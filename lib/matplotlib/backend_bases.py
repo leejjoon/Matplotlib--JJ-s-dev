@@ -414,6 +414,12 @@ class RendererBase:
     def stop_rasterizing(self):
         pass
 
+    def start_filter(self):
+        pass
+
+    def stop_filter(self, filter_func):
+        pass
+
 
 class GraphicsContextBase:
     """
