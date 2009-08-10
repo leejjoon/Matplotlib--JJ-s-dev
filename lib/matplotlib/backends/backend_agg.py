@@ -26,7 +26,7 @@ import numpy as npy
 
 from matplotlib import verbose, rcParams
 from matplotlib.backend_bases import RendererBase,\
-     FigureManagerBase, FigureCanvasBase
+     FigureManagerBase, FigureCanvasBase, GraphicsContextBase
 from matplotlib.cbook import is_string_like, maxdict
 from matplotlib.figure import Figure
 from matplotlib.font_manager import findfont
@@ -57,6 +57,8 @@ class RendererAgg(RendererBase):
         self.height = height
         if __debug__: verbose.report('RendererAgg.__init__ width=%s, height=%s'%(width, height), 'debug-annoying')
         self._renderer = _RendererAgg(int(width), int(height), dpi, debug=False)
+        self._filter_renderers = []
+
         if __debug__: verbose.report('RendererAgg.__init__ _RendererAgg done',
                                      'debug-annoying')
         #self.draw_path = self._renderer.draw_path  # see below
@@ -270,6 +272,70 @@ class RendererAgg(RendererBase):
 
         else:
             self._renderer.restore_region(region)
+
+    def start_filter(self):
+        """
+        Start filtering. It simply create a new canvas (the old one is saved).
+        """
+        self._filter_renderers.append(self._renderer)
+        self._renderer = _RendererAgg(int(self.width), int(self.height),
+                                      self.dpi)
+
+
+    def stop_filter(self, post_processing):
+        """
+        Save the plot in the current canvas as a image and apply
+        the *post_processing* function.
+
+           def post_processing(image, dpi):
+             # ny, nx, depth = image.shape
+             # image (numpy array) has RGBA channels and has a depth of 4.
+             ...
+             # create a new_image (numpy array of 4 channels, size can be
+             # different). The resulting image may have offsets from
+             # lower-left corner of the original image
+             return new_image, offset_x, offset_y
+
+        The saved renderer is restored and the returned image from
+        post_processing is plotted (using draw_image) on it.
+        """
+
+        from matplotlib._image import fromarray
+
+        width, height = int(self.width), int(self.height)
+
+        buffer, bounds = self._renderer.tostring_rgba_minimized()
+
+        l, b, w, h = bounds
+
+
+        self._renderer = self._filter_renderers.pop()
+
+        if w > 0 and h > 0:
+            from matplotlib._image import frombuffer
+            image = frombuffer(buffer, w, h, True)
+            image.is_grayscale = False
+            image.flipud_out()
+            import numpy
+            nn1, nnn2, bbb = image.as_rgba_str()
+            img = numpy.fromstring(bbb, numpy.uint8)
+            #img=image.as_rgba_str()
+            #1/0
+            #image.is_grayscale = False
+            #image.flipud_out()
+
+            img, ox, oy = post_processing(img.reshape((h, w, 4)) / 255.,
+                                          self.dpi)
+            #image = fromarray(img, 1)
+            #image.is_grayscale = False
+            #image.flipud_out()
+            #self._renderer.draw_image(l+ox, height - b - h +oy,
+            #                          image, None)
+            gc = self.new_gc()
+            #gc = GraphicsContextBase()
+            self._renderer.draw_image(gc,
+                                      l+ox, height - b - h +oy,
+                                      image)
 
 
 def new_figure_manager(num, *args, **kwargs):
