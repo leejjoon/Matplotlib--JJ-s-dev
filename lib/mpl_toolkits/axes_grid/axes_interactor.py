@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 
 import logging
-#logging.basicConfig(level=logging.DEBUG)
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.ERROR)
 
 from matplotlib.offsetbox import VPacker, TextArea, AnchoredOffsetbox
 from matplotlib.font_manager import FontProperties
@@ -137,7 +137,8 @@ class BaseInteractor(object):
 
         self._click_callbacks = {}
         #self._animated_list = set()
-
+        self.widget_list = []
+        
         self._animation_handler_on = False
 
         self._animation_on = False
@@ -150,7 +151,7 @@ class BaseInteractor(object):
         return isinstance(o, DraggableWidget)
 
     def get_widget_list(self):
-        return []
+        return self.widget_list
 
     def _install_widgets(self):
         pass
@@ -182,13 +183,13 @@ class BaseInteractor(object):
                 #if self._check_inside(l, event):
                 if l.contains(event):
                     return l
-        for l in self._click_callbacks:
-            if hasattr(l, "_contains") and l._contains:
-                if l._contains(event):
-                    return l
-            else:
-                if self._check_inside(l, event):
-                    return l
+#         for l in self._click_callbacks:
+#             if hasattr(l, "_contains") and l._contains:
+#                 if l._contains(event):
+#                     return l
+#             else:
+#                 if self._check_inside(l, event):
+#                     return l
 
         return None
 
@@ -362,7 +363,9 @@ class FigureInteractor(BaseInteractor):
         self.figure.artists.append(ma)
         m1 = ma.add_message("Drag annotes to ajust its position.")
         m1.set_figure(self.figure)
-        self._click_callbacks[m1] = self._release_toolbar_lock
+        #btn = ButtonWidget(m1, self._release_toolbar_lock)
+        #self.widget_list.append(btn)
+        #self._click_callbacks[m1] = self._release_toolbar_lock
 
 
         ma = self.message_keys = MessageArea(self.figure.bbox, loc=3)
@@ -423,7 +426,7 @@ class FigureInteractor(BaseInteractor):
     def update_widget_lock_status(self, status):
         m1 = self.message_area.children[0]
         if status:
-            m1.set_text("Widet is locked. Click here to relesase")
+            m1.set_text("Widet is locked.")
             m1._text.set_backgroundcolor("r")
             self.canvas.draw()
             self.set_animation_handler_on(False)
@@ -441,19 +444,20 @@ class FigureInteractor(BaseInteractor):
 
         _interactive = plt.isinteractive()
 
-        try:
-            self._release_toolbar_lock()
+        self._release_toolbar_lock()
 
-            w = BlockingKeyInput(self.figure)
-            w()
-            #aa.disconnect()
-        finally:
-            #ax.get_figure().canvas.widgetlock.release(aa)
-            self.disconnect()
+        if _interactive:
+            try:
+                w = BlockingKeyInput(self.figure)
+                w()
+                #aa.disconnect()
+            finally:
+                #ax.get_figure().canvas.widgetlock.release(aa)
+                self.disconnect()
 
-            self.uninstall_widgets()
-            plt.interactive(_interactive)
-            plt.draw()
+                self.uninstall_widgets()
+                plt.interactive(_interactive)
+                plt.draw()
 
 
 
@@ -658,7 +662,6 @@ class AxesInteractor(BaseInteractor):
             if co:
                 self.widget_list.remove(co)
                 del co
-                #co.remove()
                 self.deselect_current_object()
                 self.canvas.draw()
 
@@ -667,9 +670,11 @@ class AxesWidget(object):
     def __init__(self, ax):
         self.ax = ax
         self.set_highlighted(False)
-
+        super(AxesWidget, self).__init__()
+        
     def __del__(self):
-        self.remove()
+        if self._artist is not None:
+            self._artist.remove()
 
     def remove(self):
         pass
@@ -958,12 +963,12 @@ class VLinesInteractor(AxesInteractor):
             if co:
                 self.widget_list.remove(co)
                 del co
-                #co.remove()
                 self.deselect_current_object()
                 self.canvas.draw()
-
+                print self.ax.lines
+                
 import numpy as np
-from bboximage import BboxImage
+from matplotlib.image import BboxImage
 from matplotlib.transforms import Bbox, TransformedBbox
 
 class VLinesInteractor3(AxesInteractor):
@@ -1061,15 +1066,16 @@ if 0:
     fi.run()
 
 
-#if __name__ == "__main__":
-if 1:
+if __name__ == "__main__":
     fig = plt.gcf()
     fig.clf()
 
     ax1 = plt.subplot(111)
     #ax1.plot([0, 1])
 
-    ai1 = VLinesInteractor3(ax1)
+    #ai1 = VLinesInteractor3(ax1)
+    ai1 = VSpanInteractor(ax1, 0.3, 0.5)
+    #ai1 = VLinesInteractor(ax1)
 
     fi = FigureInteractor(fig, [ai1])
     fi.run()
