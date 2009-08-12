@@ -1404,8 +1404,8 @@ class RendererPdf(RendererBase):
     def draw_tex(self, gc, x, y, s, prop, angle):
         texmanager = self.get_texmanager()
         fontsize = prop.get_size_in_points()
-        dvifile = texmanager.make_dvi(s, fontsize)
-        dvi = dviread.Dvi(dvifile, 72)
+        dvifilelike = texmanager.get_dvi(s, fontsize)
+        dvi = dviread.DviFromFileLike(dvifilelike, 72)
         page = iter(dvi).next()
         dvi.close()
 
@@ -1551,7 +1551,8 @@ class RendererPdf(RendererBase):
             self.file.output(Op.begin_text,
                              self.file.fontName(prop),
                              fontsize,
-                             Op.selectfont)
+                             Op.selectfont,
+                             )
             self._setup_textpos(x, y, descent, angle)
             self.file.output(self.encode_string(s, fonttype), Op.show, Op.end_text)
 
@@ -1579,7 +1580,8 @@ class RendererPdf(RendererBase):
                     self.file.output(Op.begin_text,
                                      self.file.fontName(prop),
                                      fontsize,
-                                     Op.selectfont)
+                                     Op.selectfont,
+                                     )
 
                 for chunk_type, chunk in chunks:
                     if mode == 1 and chunk_type == 1:

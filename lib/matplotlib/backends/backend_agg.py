@@ -30,15 +30,109 @@ from matplotlib.backend_bases import RendererBase,\
 from matplotlib.cbook import is_string_like, maxdict
 from matplotlib.figure import Figure
 from matplotlib.font_manager import findfont
-from matplotlib.ft2font import FT2Font, LOAD_FORCE_AUTOHINT
+from matplotlib.ft2font import FT2Font, LOAD_FORCE_AUTOHINT, LOAD_NO_HINTING
+import matplotlib.ft2font as ft2font
 from matplotlib.mathtext import MathTextParser
 from matplotlib.path import Path
 from matplotlib.transforms import Bbox, BboxBase
+
+from matplotlib.transforms import Affine2D
+import matplotlib.dviread as dviread
+from matplotlib import ft2font
 
 from _backend_agg import RendererAgg as _RendererAgg
 from matplotlib import _png
 
 backend_version = 'v2.2'
+
+
+from matplotlib.type1font import Type1Font
+
+def get_glyph_map(fp):
+    _map_list = [l[4:-3].split() for l \
+                 in fp.parts[0].split("\r") if l[:3] == "dup"]
+    _map = {}
+    [_map.setdefault(s,[]).append(int(n)) for n, s in _map_list]
+    _map_list = [(int(n), max(_map[s])) for  n, s in _map_list]
+    #_map_list = [(max(_map[s], int(n))) for  n, s in _map_list]
+    return dict(_map_list)
+
+def get_glyph_map2(fp):
+    _map_list = [l[4:-3].split() for l \
+                 in fp.parts[0].split("\r") if l[:3] == "dup"]
+    _map = {}
+    return dict([(int(n), s) for n, s in _map_list])
+    #[_map.setdefault(s,[]).append(int(n)) for n, s in _map_list]
+    #_map_list = [(int(n), max(_map[s])) for  n, s in _map_list]
+    ##_map_list = [(max(_map[s], int(n))) for  n, s in _map_list]
+    #return dict(_map_list)
+
+
+
+
+class FontHelper(object):
+    def __init__(self):
+        self.FONT_SCALE = 100.
+
+    def _get_char_verts_codes(self, font, char):
+        font.set_size(self.FONT_SCALE, 72)
+
+        glyph = font.load_char(ord(char), flags=LOAD_NO_HINTING)
+        codes, verts = [], []
+        for step in glyph.path:
+            if step[0] == 0:   # MOVE_TO
+                codes.append(PATH.MOVETO)
+                verts.append((step[1], -step[2]))
+            elif step[0] == 1: # LINE_TO
+                codes.append(PATH.LINETO)
+                verts.append((step[1], -step[2]))
+            elif step[0] == 2: # CURVE3
+                codes.extend([PATH.CURVE3, PATH.CURVE3])
+                verts.extend([(step[1], -step[2]),
+                              (step[3], -step[4]),
+                              ])
+            elif step[0] == 3: # CURVE4
+                codes.extend([PATH.CURVE4, PATH.CURVE4, PATH.CURVE4])
+                verts.extend([(step[1], -step[2]),
+                              (step[3], -step[4]),
+                              (step[5], -step[6]),
+                              ])
+            elif step[0] == 4: # ENDPOLY
+                codes.appedn(PATH.CLOSEPOLY)
+                verts.append([0, 0])
+
+        return verts, codes
+
+    def _get_horiz_advance(self, font, s):
+        cmap = font.get_charmap()
+        lastgind = None
+        currx = 0
+        for c in s:
+            charnum = self._get_char_def_id(prop, c)
+            ccode = ord(c)
+            gind = cmap.get(ccode)
+            if gind is None:
+                ccode = ord('?')
+                gind = 0
+            glyph = font.load_char(ccode, flags=LOAD_NO_HINTING)
+
+            if lastgind is not None:
+                kern = font.get_kerning(lastgind, gind, KERNING_DEFAULT)
+            else:
+                kern = 0
+            currx += (kern / 64.0) / (self.FONT_SCALE / fontsize)
+
+            svg.append('<use xlink:href="#%s"' % charnum)
+            if currx != 0:
+                svg.append(' x="%f"' %
+                           (currx * (self.FONT_SCALE / fontsize)))
+            svg.append('/>\n')
+
+            currx += (glyph.linearHoriAdvance / 65536.0) / (self.FONT_SCALE / fontsize)
+            lastgind = gind
+
+
+
 
 class RendererAgg(RendererBase):
     """
@@ -46,11 +140,12 @@ class RendererAgg(RendererBase):
     context instance that controls the colors/styles
     """
     debug=1
+
     def __init__(self, width, height, dpi):
         if __debug__: verbose.report('RendererAgg.__init__', 'debug-annoying')
         RendererBase.__init__(self)
         self.texd = maxdict(50)  # a cache of tex image rasters
-        self._fontd = maxdict(50)
+        self._ttf_fontd = maxdict(50)
 
         self.dpi = dpi
         self.width = width
@@ -70,6 +165,10 @@ class RendererAgg(RendererBase):
         self.copy_from_bbox = self._renderer.copy_from_bbox
         self.tostring_rgba_minimized = self._renderer.tostring_rgba_minimized
         self.mathtext_parser = MathTextParser('Agg')
+
+
+        self.tex_font_map = None
+        self._ps_fontd = maxdict(50)
 
         self.bbox = Bbox.from_bounds(0, 0, self.width, self.height)
         if __debug__: verbose.report('RendererAgg.__init__ done',
@@ -113,6 +212,18 @@ class RendererAgg(RendererBase):
         y = int(y) - oy
         self._renderer.draw_text_image(font_image, x, y + 1, angle, gc)
 
+    def get_mathtext_image(self, gc, x, y, s, prop, angle):
+        """
+        Draw the math text using matplotlib.mathtext
+        """
+        if __debug__: verbose.report('RendererAgg.draw_mathtext',
+                                     'debug-annoying')
+        ox, oy, width, height, descent, font_image, used_characters = \
+            self.mathtext_parser.parse(s, self.dpi, prop)
+
+        return font_image
+
+
     def draw_text(self, gc, x, y, s, prop, angle, ismath):
         """
         Render the text
@@ -132,7 +243,6 @@ class RendererAgg(RendererBase):
             font.set_text(s, 0, flags=LOAD_FORCE_AUTOHINT)
         font.draw_glyphs_to_bitmap()
 
-        #print x, y, int(x), int(y)
 
         self._renderer.draw_text_image(font.get_image(), int(x), int(y) + 1, angle, gc)
 
@@ -167,7 +277,86 @@ class RendererAgg(RendererBase):
         d /= 64.0
         return w, h, d
 
+
+    def draw_text_as_path(self, gc, x, y, s, prop, angle):
+
+        font = self._get_ttf_font(prop)
+        font.set_text(s, 0.0, flags=LOAD_NO_HINTING)
+        y -= font.get_descent() / 64.0
+
+        fontsize = prop.get_size_in_points()
+        #color = rgb2hex(gc.get_rgb()[:3])
+        #write = self._svgwriter.write
+
+        new_chars = []
+        for c in s:
+            path = self._add_char_def(prop, c)
+            if path is not None:
+                new_chars.append(path)
+        if len(new_chars):
+            write('<defs>\n')
+            for path in new_chars:
+                write(path)
+            write('</defs>\n')
+
+        svg = []
+        clipid = self._get_gc_clip_svg(gc)
+        if clipid is not None:
+            svg.append('<g clip-path="url(#%s)">\n' % clipid)
+
+        svg.append('<g style="fill: %s; opacity: %f" transform="' % (color, gc.get_alpha()))
+        if angle != 0:
+            svg.append('translate(%f,%f)rotate(%1.1f)' % (x,y,-angle))
+        elif x != 0 or y != 0:
+            svg.append('translate(%f,%f)' % (x, y))
+        svg.append('scale(%f)">\n' % (fontsize / self.FONT_SCALE))
+
+        cmap = font.get_charmap()
+        lastgind = None
+        currx = 0
+        for c in s:
+            charnum = self._get_char_def_id(prop, c)
+            ccode = ord(c)
+            gind = cmap.get(ccode)
+            if gind is None:
+                ccode = ord('?')
+                gind = 0
+            glyph = font.load_char(ccode, flags=LOAD_NO_HINTING)
+
+            if lastgind is not None:
+                kern = font.get_kerning(lastgind, gind, KERNING_DEFAULT)
+            else:
+                kern = 0
+            currx += (kern / 64.0) / (self.FONT_SCALE / fontsize)
+
+            svg.append('<use xlink:href="#%s"' % charnum)
+            if currx != 0:
+                svg.append(' x="%f"' %
+                           (currx * (self.FONT_SCALE / fontsize)))
+            svg.append('/>\n')
+
+            currx += (glyph.linearHoriAdvance / 65536.0) / (self.FONT_SCALE / fontsize)
+            lastgind = gind
+        svg.append('</g>\n')
+        if clipid is not None:
+            svg.append('</g>\n')
+        svg = ''.join(svg)
+
+
+    @classmethod
+    def select_tex_drawing(cls, mode="png"):
+        if mode == "png":
+            cls._draw_tex_real = cls.draw_tex_png
+        elif mode == "dviread":
+            cls._draw_tex_real = cls.draw_tex_dviread
+        else:
+            raise Exception("Unknown mode for tex_drawing : %s" % (mode,))
+            
     def draw_tex(self, gc, x, y, s, prop, angle):
+        self._draw_tex_real(gc, x, y, s, prop, angle)
+        #self.draw_tex_png(gc, x, y, s, prop, angle)
+
+    def draw_tex_png(self, gc, x, y, s, prop, angle):
         # todo, handle props, angle, origins
         size = prop.get_size_in_points()
 
@@ -178,11 +367,126 @@ class RendererAgg(RendererBase):
             Z = texmanager.get_grey(s, size, self.dpi)
             Z = npy.array(Z * 255.0, npy.uint8)
 
-        self._renderer.draw_text_image(Z, x, y, angle, gc)
+        dx, dy = texmanager.get_png_correction_offset(s, size, self.dpi)
+
+        self._renderer.draw_text_image(Z, x+dx, y+dy, angle, gc)
+
+
+    def draw_tex_dviread(self, gc, x, y, s, prop, angle):
+        texmanager = self.get_texmanager()
+
+        if self.tex_font_map is None:
+            self.tex_font_map = dviread.PsfontsMap(dviread.find_tex_file('pdftex.map'))
+
+        fontsize = prop.get_size_in_points()
+        #dvifile = texmanager.make_dvi(s, fontsize)
+        #dvi = dviread.Dvi(dvifile, self.dpi)
+        dvifilelike = texmanager.get_dvi(s, fontsize)
+        dvi = dviread.DviFromFileLike(dvifilelike, self.dpi)
+        #dvifile = texmanager.get_dvi(s, fontsize)
+        #dvi = dviread.Dvi(dvifile, self.dpi)
+        page = iter(dvi).next()
+        dvi.close()
+
+        # Gather font information and do some setup for combining
+        # characters into strings.
+        oldfont, seq = None, []
+        for x1, y1, dvifont, glyph, width in page.text:
+            if glyph == 0:
+                continue
+            font_and_encoding = self._ps_fontd.get(dvifont.texname)
+
+            if font_and_encoding is None:
+                font_bunch =  self.tex_font_map[dvifont.texname]
+                font = ft2font.FT2Font(font_bunch.filename)
+
+                if font_bunch.encoding:
+                    enc = dviread.Encoding(font_bunch.encoding)
+                else:
+                    enc = None
+
+                self._ps_fontd[dvifont.texname] = font, enc
+
+            else:
+                font, enc = font_and_encoding
+
+            font.set_size(dvifont.size, self.dpi)
+            #ft2font_flag = (ft2font.LOAD_RENDER | ft2font.LOAD_TARGET_LIGHT)
+            #ft2font_flag = (ft2font.LOAD_RENDER | ft2font.LOAD_TARGET_LIGHT)
+            #ft2font_flag = ft2font.LOAD_NO_AUTOHINT
+            ft2font_flag = ft2font.LOAD_TARGET_LIGHT
+            if enc:
+                ng = font.get_name_index(enc.encoding[glyph])
+                #font.load_glyph(x1*64, y1*64, ng, flags=ft2font_flag)
+                #font.load_glyph(0., 0, ng, flags=ft2font_flag)
+                font.load_glyph(x1*64., y1*64., ng, flags=ft2font_flag)
+                #dx, dy = font.draw_glyphs_to_bitmap()
+
+            else:
+                #font.load_glyph(0., 0, glyph, flags=ft2font_flag)
+                font.load_glyph(x1*64, y1*64., glyph, flags=ft2font_flag)
+                #dx, dy = font.draw_glyphs_to_bitmap()
+
+
+            dx, dy = font.draw_glyphs_to_bitmap()
+            dx, dy = dx/64., dy/64.
+            des = font.get_descent()/64.
+            # ???
+            #dx, dy = 0, 1
+            #dx, dy = 0, 0
+            self._renderer.draw_text_image(font.get_image(),
+                                           #int(x+dx), int(y-dy), angle, gc)
+                                           int(x+dx)+1, int(y-dy)+2, angle, gc)
+            #int(x+x1+dx), int(y-y1-dy+1), angle, gc)
+            font.clear()
+
+
+        # Then output the boxes (e.g. variable-length lines of square
+        # roots).
+        # ???
+        dx, dy = 0, 1
+        mytrans = Affine2D().rotate_deg(0).translate((int(x+dx)),
+                                                     (int(self.height-y+dy)))
+        boxgc = self.new_gc()
+        boxgc.copy_properties(gc)
+        pathops = [Path.MOVETO, Path.LINETO]
+        dpi = self.dpi*1.
+        for x1, y1, h, w in page.boxes:
+            boxgc.set_linewidth(h)
+            path = Path([[x1, y1+h/2.], [x1+w, y1+h/2.]], pathops)
+            self._renderer.draw_path(boxgc, path, mytrans, gc._rgb)
+
+
+    _draw_tex_real = draw_tex_png
 
     def get_canvas_width_height(self):
         'return the canvas width and height in display coords'
         return self.width, self.height
+
+    def _get_ttf_font(self, prop):
+        """
+        Get the font for text instance t, cacheing for efficiency
+        """
+        if __debug__: verbose.report('RendererAgg._get_agg_font',
+                                     'debug-annoying')
+
+        key = hash(prop)
+        font = self._ttf_fontd.get(key)
+
+        if font is None:
+            fname = findfont(prop)
+            font = self._ttf_fontd.get(fname)
+            if font is None:
+                font = FT2Font(str(fname))
+                self._ttf_fontd[fname] = font
+            self._ttf_fontd[key] = font
+
+        font.clear()
+        size = prop.get_size_in_points()
+        font.set_size(size, self.dpi)
+
+        return font
+
 
     def _get_agg_font(self, prop):
         """
@@ -192,15 +496,15 @@ class RendererAgg(RendererBase):
                                      'debug-annoying')
 
         key = hash(prop)
-        font = self._fontd.get(key)
+        font = self._ttf_fontd.get(key)
 
         if font is None:
             fname = findfont(prop)
-            font = self._fontd.get(fname)
+            font = self._ttf_fontd.get(fname)
             if font is None:
                 font = FT2Font(str(fname))
-                self._fontd[fname] = font
-            self._fontd[key] = font
+                self._ttf_fontd[fname] = font
+            self._ttf_fontd[key] = font
 
         font.clear()
         size = prop.get_size_in_points()
