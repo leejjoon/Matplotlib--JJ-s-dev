@@ -7,35 +7,62 @@ import matplotlib.mlab as mlab
 
 mmm = []
 
-def gauss(im, dpi):
+class BaseFilter(object):
+    pass
+
+class GaussianFilter(BaseFilter):
     "simple gauss filter"
-    pad = 5
-    ny, nx, depth = im.shape
-    new_alpha = np.zeros([pad*2+ny, pad*2+nx], dtype="d")
-    new_alpha[pad:-pad, pad:-pad] = np.sum(im[:,:,:3]*[0.3,0.3,0.3], axis=-1)*im[:,:,-1]
-    aaa = NI.grey_dilation(new_alpha, size=(3, 3))
-    alpha2 = NI.gaussian_filter(aaa, 2)
-    new_im = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
-    new_im[:,:,-1] = alpha2
-    new_im[:,:,:-1] = 0.
-    offsetx, offsety = -pad, -pad
-    mmm.append(im)
-    return new_im, offsetx, offsety
+    def __init__(self, sigma, alpha=0.3, offsets=None, color=None):
+        self.sigma = sigma
+        self.alpha = alpha
+        if color is None:
+            self.color=(0, 0, 0)
+        else:
+            self.color=color
+        if offsets is None:
+            self.offsets = (0, 0)
+        else:
+            self.offsets = offsets
+
+    def __call__(self, im, dpi):
+        pad = int(self.sigma*3)
+        offsetx, offsety = int(self.offsets[0]), int(self.offsets[1])
+        ny, nx, depth = im.shape
+        new_im = np.empty([pad*2+ny, pad*2+nx, depth], dtype="d")
+        alpha = new_im[:,:,3]
+        alpha.fill(0.)
+        alpha[pad+offsetx:-pad+offsetx, pad+offsety:-pad+offsety] = \
+                                        im[:,:,-1]*self.alpha
+        alpha2 = NI.gaussian_filter(alpha, self.sigma)
+        new_im[:,:,-1] = alpha2
+        new_im[:,:,:-1] = self.color
+        
+        return new_im, -pad, -pad
 
 
 
-def grow(im, dpi):
+class GrowFilter(BaseFilter):
     "enlarge the area"
-    pad = 5
-    ny, nx, depth = im.shape
-    new_alpha = np.zeros([pad*2+ny, pad*2+nx], dtype="d")
-    new_alpha[pad:-pad, pad:-pad] = im[:,:,-1]
-    alpha2 = NI.grey_dilation(new_alpha, size=(3, 3))
-    new_im = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
-    new_im[:,:,-1] = alpha2
-    new_im[:,:,:-1] = 1.
-    offsetx, offsety = -pad, -pad
-    return new_im, offsetx, offsety
+    def __init__(self, pixels, color=None):
+        self.pixels = pixels
+        if color is None:
+            self.color=(1, 1, 1)
+        else:
+            self.color=color
+
+    def __call__(self, im, dpi):
+        pad = self.pixels
+        ny, nx, depth = im.shape
+        new_im = np.empty([pad*2+ny, pad*2+nx, depth], dtype="d")
+        alpha = new_im[:,:,3]
+        alpha.fill(0)
+        alpha[pad:-pad, pad:-pad] = im[:,:,-1]
+        alpha2 = NI.grey_dilation(alpha, size=(self.pixels, self.pixels))
+        new_im[:,:,-1] = alpha2
+        new_im[:,:,:-1] = self.color
+        offsetx, offsety = -pad, -pad
+
+        return new_im, offsetx, offsety
 
 
 from matplotlib.artist import Artist
@@ -96,8 +123,8 @@ def filtered_text(ax):
     for t in cl:
         t.set_color("k")
 
-    # Add white background to improve visibility of labels.
-    white_glows = FilteredArtistList(cl, grow)
+    # Add white glows to improve visibility of labels.
+    white_glows = FilteredArtistList(cl, GrowFilter(3))
     ax.add_artist(white_glows)
     white_glows.set_zorder(cl[0].get_zorder()-0.1)
 
@@ -110,13 +137,12 @@ def drop_shadow_line(ax):
 
     # draw lines
     l1, = ax.plot([0.1, 0.5, 0.9], [0.1, 0.9, 0.5], "bo-",
-                  mec="b", lw=5, ms=10, label="Line 1")
-    l2, = ax.plot([0.1, 0.5, 0.9], [0.5, 0.2, 0.7], "r-",
-                  mec="r", lw=5, ms=10, color="r", label="Line 2")
+                  mec="b", mfc="w", lw=5, mew=3, ms=10, label="Line 1")
+    l2, = ax.plot([0.1, 0.5, 0.9], [0.5, 0.2, 0.7], "ro-",
+                  mec="r", mfc="w", lw=5, mew=3, ms=10, label="Line 1")
 
-    #l1.set_rasterized(True) # to support mixed-mode renderers
-    l1.set_visible(False)
-    l2.set_visible(False)
+    
+    gauss = GaussianFilter(2)
     
     for l in [l1, l2]:
 
@@ -126,7 +152,6 @@ def drop_shadow_line(ax):
         yy = l.get_ydata()
         shadow, = ax.plot(xx, yy)
         shadow.update_from(l)
-        shadow.set_visible(True)
 
         # offset transform
         ot = mtransforms.offset_copy(l.get_transform(), ax.figure,
@@ -149,17 +174,50 @@ def drop_shadow_line(ax):
     ax.xaxis.set_visible(False)
     ax.yaxis.set_visible(False)
 
+
+
+
+def drop_shadow_patches(ax):
+    # copyed from barchart_demo.py
+    N = 5
+    menMeans = (20, 35, 30, 35, 27)
+
+    ind = np.arange(N)  # the x locations for the groups
+    width = 0.35       # the width of the bars
+
+    rects1 = ax.bar(ind, menMeans, width, color='r', ec="w", lw=2)
+
+    womenMeans = (25, 32, 34, 20, 25)
+    rects2 = ax.bar(ind+width+0.1, womenMeans, width, color='y', ec="w", lw=2)
+
+    gauss = GaussianFilter(1.5, offsets=(1,1), )
+    shadow = FilteredArtistList(rects1+rects2, gauss)
+    ax.add_artist(shadow)
+    shadow.set_zorder(rects1[0].get_zorder()-0.1)
+
+    ax.set_xlim(ind[0]-0.5, ind[-1]+1.5)
+    ax.set_ylim(0, 40)
+    
+    ax.xaxis.set_visible(False)
+    ax.yaxis.set_visible(False)
+
     
 
     
 if 1:
 
-    plt.figure(figsize=(6, 3))
+    plt.figure(figsize=(8, 3))
+    plt.subplots_adjust(left=0.05, right=0.95)
 
-    #ax = plt.subplot(121)
-    #filtered_text(ax)
+    ax = plt.subplot(131)
+    filtered_text(ax)
 
-    ax = plt.subplot(122)
+    ax = plt.subplot(132)
     drop_shadow_line(ax)
+
+    ax = plt.subplot(133)
+    drop_shadow_patches(ax)
     
     plt.show()
+
+

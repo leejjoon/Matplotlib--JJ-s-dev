@@ -61,6 +61,15 @@ class RendererAgg(RendererBase):
 
         if __debug__: verbose.report('RendererAgg.__init__ _RendererAgg done',
                                      'debug-annoying')
+
+        self._update_methods()
+        self.mathtext_parser = MathTextParser('Agg')
+
+        self.bbox = Bbox.from_bounds(0, 0, self.width, self.height)
+        if __debug__: verbose.report('RendererAgg.__init__ done',
+                                     'debug-annoying')
+
+    def _update_methods(self):
         #self.draw_path = self._renderer.draw_path  # see below
         self.draw_markers = self._renderer.draw_markers
         self.draw_path_collection = self._renderer.draw_path_collection
@@ -69,11 +78,6 @@ class RendererAgg(RendererBase):
         self.draw_image = self._renderer.draw_image
         self.copy_from_bbox = self._renderer.copy_from_bbox
         self.tostring_rgba_minimized = self._renderer.tostring_rgba_minimized
-        self.mathtext_parser = MathTextParser('Agg')
-
-        self.bbox = Bbox.from_bounds(0, 0, self.width, self.height)
-        if __debug__: verbose.report('RendererAgg.__init__ done',
-                                     'debug-annoying')
 
     def draw_path(self, gc, path, transform, rgbFace=None):
         """
@@ -280,7 +284,7 @@ class RendererAgg(RendererBase):
         self._filter_renderers.append(self._renderer)
         self._renderer = _RendererAgg(int(self.width), int(self.height),
                                       self.dpi)
-
+        self._update_methods()
 
     def stop_filter(self, post_processing):
         """
@@ -310,29 +314,16 @@ class RendererAgg(RendererBase):
 
 
         self._renderer = self._filter_renderers.pop()
+        self._update_methods()
 
         if w > 0 and h > 0:
-            from matplotlib._image import frombuffer
-            image = frombuffer(buffer, w, h, True)
-            image.is_grayscale = False
-            image.flipud_out()
-            import numpy
-            nn1, nnn2, bbb = image.as_rgba_str()
-            img = numpy.fromstring(bbb, numpy.uint8)
-            #img=image.as_rgba_str()
-            #1/0
-            #image.is_grayscale = False
-            #image.flipud_out()
-
+            img = npy.fromstring(buffer, npy.uint8)
             img, ox, oy = post_processing(img.reshape((h, w, 4)) / 255.,
                                           self.dpi)
-            #image = fromarray(img, 1)
-            #image.is_grayscale = False
-            #image.flipud_out()
-            #self._renderer.draw_image(l+ox, height - b - h +oy,
-            #                          image, None)
+            image = fromarray(img, 1)
+            image.flipud_out()
+    
             gc = self.new_gc()
-            #gc = GraphicsContextBase()
             self._renderer.draw_image(gc,
                                       l+ox, height - b - h +oy,
                                       image)
