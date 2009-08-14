@@ -69,9 +69,14 @@ class RendererAgg(RendererBase):
         if __debug__: verbose.report('RendererAgg.__init__ done',
                                      'debug-annoying')
 
+    def draw_markers(self, *kl, **kw):
+        # for filtering to work with rastrization, methods needs to be wrapped.
+        # maybe there is better way to do it.
+        return self._renderer.draw_markers(*kl, **kw)
+
     def _update_methods(self):
         #self.draw_path = self._renderer.draw_path  # see below
-        self.draw_markers = self._renderer.draw_markers
+        #self.draw_markers = self._renderer.draw_markers
         self.draw_path_collection = self._renderer.draw_path_collection
         self.draw_quad_mesh = self._renderer.draw_quad_mesh
         self.draw_gouraud_triangle = self._renderer.draw_gouraud_triangle
@@ -170,6 +175,81 @@ class RendererAgg(RendererBase):
         h /= 64.0
         d /= 64.0
         return w, h, d
+
+
+    def draw_text_as_path(self, gc, x, y, s, prop, angle):
+
+        font = self._get_ttf_font(prop)
+        font.set_text(s, 0.0, flags=LOAD_NO_HINTING)
+        y -= font.get_descent() / 64.0
+
+        fontsize = prop.get_size_in_points()
+        #color = rgb2hex(gc.get_rgb()[:3])
+        #write = self._svgwriter.write
+
+        new_chars = []
+        for c in s:
+            path = self._add_char_def(prop, c)
+            if path is not None:
+                new_chars.append(path)
+        if len(new_chars):
+            write('<defs>\n')
+            for path in new_chars:
+                write(path)
+            write('</defs>\n')
+
+        svg = []
+        clipid = self._get_gc_clip_svg(gc)
+        if clipid is not None:
+            svg.append('<g clip-path="url(#%s)">\n' % clipid)
+
+        svg.append('<g style="fill: %s; opacity: %f" transform="' % (color, gc.get_alpha()))
+        if angle != 0:
+            svg.append('translate(%f,%f)rotate(%1.1f)' % (x,y,-angle))
+        elif x != 0 or y != 0:
+            svg.append('translate(%f,%f)' % (x, y))
+        svg.append('scale(%f)">\n' % (fontsize / self.FONT_SCALE))
+
+        cmap = font.get_charmap()
+        lastgind = None
+        currx = 0
+        for c in s:
+            charnum = self._get_char_def_id(prop, c)
+            ccode = ord(c)
+            gind = cmap.get(ccode)
+            if gind is None:
+                ccode = ord('?')
+                gind = 0
+            glyph = font.load_char(ccode, flags=LOAD_NO_HINTING)
+
+            if lastgind is not None:
+                kern = font.get_kerning(lastgind, gind, KERNING_DEFAULT)
+            else:
+                kern = 0
+            currx += (kern / 64.0) / (self.FONT_SCALE / fontsize)
+
+            svg.append('<use xlink:href="#%s"' % charnum)
+            if currx != 0:
+                svg.append(' x="%f"' %
+                           (currx * (self.FONT_SCALE / fontsize)))
+            svg.append('/>\n')
+
+            currx += (glyph.linearHoriAdvance / 65536.0) / (self.FONT_SCALE / fontsize)
+            lastgind = gind
+        svg.append('</g>\n')
+        if clipid is not None:
+            svg.append('</g>\n')
+        svg = ''.join(svg)
+
+
+    @classmethod
+    def select_tex_drawing(cls, mode="png"):
+        if mode == "png":
+            cls._draw_tex_real = cls.draw_tex_png
+        elif mode == "dviread":
+            cls._draw_tex_real = cls.draw_tex_dviread
+        else:
+            raise Exception("Unknown mode for tex_drawing : %s" % (mode,))
 
     def draw_tex(self, gc, x, y, s, prop, angle):
         # todo, handle props, angle, origins
@@ -322,7 +402,7 @@ class RendererAgg(RendererBase):
                                           self.dpi)
             image = fromarray(img, 1)
             image.flipud_out()
-    
+
             gc = self.new_gc()
             self._renderer.draw_image(gc,
                                       l+ox, height - b - h +oy,

@@ -5,39 +5,105 @@ import scipy.ndimage as NI
 import matplotlib.cm as cm
 import matplotlib.mlab as mlab
 
-mmm = []
 
 class BaseFilter(object):
-    pass
+    def prepare_image(self, src_image, dpi, pad):
+        ny, nx, depth = src_image.shape
+        #tgt_image = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
+        padded_src = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
+        padded_src[pad:-pad, pad:-pad,:] = src_image[:,:,:]
+
+        return padded_src#, tgt_image
+
+    def get_pad(self, dpi):
+        return 0
+
+    def __call__(self, im, dpi):
+        pad = self.get_pad(dpi)
+        padded_src = self.prepare_image(im, dpi, pad)
+        tgt_image = self.process_image(padded_src, dpi)
+        return tgt_image, -pad, -pad
+
+
+class OffsetFilter(BaseFilter):
+    def __init__(self, offsets=None):
+        if offsets is None:
+            self.offsets = (0, 0)
+        else:
+            self.offsets = offsets
+
+    def get_pad(self, dpi):
+        return max(*self.offsets)
+
+    def process_image(self, padded_src, dpi):
+        ox, oy = self.offsets
+        a1 = np.roll(padded_src, ox, axis=1)
+        a2 = np.roll(a1, -oy, axis=0)
+        return a2
 
 class GaussianFilter(BaseFilter):
     "simple gauss filter"
-    def __init__(self, sigma, alpha=0.3, offsets=None, color=None):
+    def __init__(self, sigma, alpha=0.5, color=None):
         self.sigma = sigma
         self.alpha = alpha
         if color is None:
             self.color=(0, 0, 0)
         else:
             self.color=color
-        if offsets is None:
-            self.offsets = (0, 0)
-        else:
-            self.offsets = offsets
 
-    def __call__(self, im, dpi):
-        pad = int(self.sigma*3)
-        offsetx, offsety = int(self.offsets[0]), int(self.offsets[1])
-        ny, nx, depth = im.shape
-        new_im = np.empty([pad*2+ny, pad*2+nx, depth], dtype="d")
-        alpha = new_im[:,:,3]
-        alpha.fill(0.)
-        alpha[pad+offsetx:-pad+offsetx, pad+offsety:-pad+offsety] = \
-                                        im[:,:,-1]*self.alpha
-        alpha2 = NI.gaussian_filter(alpha, self.sigma)
-        new_im[:,:,-1] = alpha2
-        new_im[:,:,:-1] = self.color
-        
-        return new_im, -pad, -pad
+    def get_pad(self, dpi):
+        return int(self.sigma*3)
+
+
+    def process_image(self, padded_src, dpi):
+        #offsetx, offsety = int(self.offsets[0]), int(self.offsets[1])
+        tgt_image = np.zeros_like(padded_src)
+        tgt_image[:,:,-1] = NI.gaussian_filter(padded_src[:,:,-1]*self.alpha,
+                                               self.sigma)
+        tgt_image[:,:,:-1] = self.color
+        return tgt_image
+
+class DropShadowFilter(BaseFilter):
+    def __init__(self, sigma, alpha=0.3, color=None, offsets=None):
+        self.gauss_filter = GaussianFilter(sigma, alpha, color)
+        self.offset_filter = OffsetFilter(offsets)
+
+    def get_pad(self, dpi):
+        return max(self.gauss_filter.get_pad(dpi),
+                   self.offset_filter.get_pad(dpi))
+
+    def process_image(self, padded_src, dpi):
+        t1 = self.gauss_filter.process_image(padded_src, dpi)
+        t2 = self.offset_filter.process_image(t1, dpi)
+        return t2
+
+
+from matplotlib.colors import LightSource
+
+class LightFilter(BaseFilter):
+    "simple gauss filter"
+    def __init__(self, sigma, fraction=0.5):
+        self.gauss_filter = GaussianFilter(sigma, alpha=1)
+        self.light_source = LightSource()
+        self.fraction = fraction
+        #hsv_min_val=0.5,hsv_max_val=0.9,
+        #                                hsv_min_sat=0.1,hsv_max_sat=0.1)
+    def get_pad(self, dpi):
+        return self.gauss_filter.get_pad(dpi)
+
+    def process_image(self, padded_src, dpi):
+        t1 = self.gauss_filter.process_image(padded_src, dpi)
+        elevation = t1[:,:,3]
+        rgb = padded_src[:,:,:3]
+
+        rgb2 = self.light_source.shade_rgb(rgb, elevation,
+                                           fraction=self.fraction)
+
+        tgt = np.empty_like(padded_src)
+        tgt[:,:,:3] = rgb2
+        tgt[:,:,3] = padded_src[:,:,3]
+
+        return tgt
 
 
 
@@ -75,7 +141,7 @@ class FilteredArtistList(Artist):
         self._artist_list = artist_list
         self._filter = filter
         Artist.__init__(self)
-        
+
     def draw(self, renderer):
         renderer.start_rasterizing()
         renderer.start_filter()
@@ -112,7 +178,7 @@ def filtered_text(ax):
                     extent=(-3,3,-2,2))
 
     ax.set_aspect("auto")
-    
+
     # contour label
     cl = ax.clabel(CS, levels[1::2],  # label every second level
                    inline=1,
@@ -141,9 +207,9 @@ def drop_shadow_line(ax):
     l2, = ax.plot([0.1, 0.5, 0.9], [0.5, 0.2, 0.7], "ro-",
                   mec="r", mfc="w", lw=5, mew=3, ms=10, label="Line 1")
 
-    
-    gauss = GaussianFilter(2)
-    
+
+    gauss = DropShadowFilter(2)
+
     for l in [l1, l2]:
 
         # draw shadows with same lines with slight offset.
@@ -165,7 +231,7 @@ def drop_shadow_line(ax):
         shadow.set_zorder(l.get_zorder()-0.5)
         shadow.set_agg_filter(gauss)
         shadow.set_rasterized(True) # to support mixed-mode renderers
-        
+
 
 
     ax.set_xlim(0., 1.)
@@ -190,34 +256,57 @@ def drop_shadow_patches(ax):
     womenMeans = (25, 32, 34, 20, 25)
     rects2 = ax.bar(ind+width+0.1, womenMeans, width, color='y', ec="w", lw=2)
 
-    gauss = GaussianFilter(1.5, offsets=(1,1), )
+    #gauss = GaussianFilter(1.5, offsets=(1,1), )
+    gauss = DropShadowFilter(1.5, offsets=(1,1), )
     shadow = FilteredArtistList(rects1+rects2, gauss)
     ax.add_artist(shadow)
     shadow.set_zorder(rects1[0].get_zorder()-0.1)
 
     ax.set_xlim(ind[0]-0.5, ind[-1]+1.5)
     ax.set_ylim(0, 40)
-    
+
     ax.xaxis.set_visible(False)
     ax.yaxis.set_visible(False)
 
-    
 
-    
+def light_filter_pie(ax):
+    fracs = [15,30,45, 10]
+    explode=(0, 0.05, 0, 0)
+    pies = ax.pie(fracs, explode=explode)
+    ax.patch.set_visible(True)
+
+    light_filter = LightFilter(8)
+    for p in pies[0]:
+        p.set_agg_filter(light_filter)
+        p.set_rasterized(True) # to support mixed-mode renderers
+        p.set(ec="none",
+              lw=2)
+
+    gauss = DropShadowFilter(3, offsets=(3,4), alpha=0.7)
+    shadow = FilteredArtistList(pies[0], gauss)
+    ax.add_artist(shadow)
+    shadow.set_zorder(pies[0][0].get_zorder()-0.1)
+
+
 if 1:
 
-    plt.figure(figsize=(8, 3))
+    plt.figure(1, figsize=(6, 6))
     plt.subplots_adjust(left=0.05, right=0.95)
 
-    ax = plt.subplot(131)
+    ax = plt.subplot(221)
     filtered_text(ax)
 
-    ax = plt.subplot(132)
+    ax = plt.subplot(222)
     drop_shadow_line(ax)
 
-    ax = plt.subplot(133)
+    ax = plt.subplot(223)
     drop_shadow_patches(ax)
-    
+
+    ax = plt.subplot(224)
+    ax.set_aspect(1)
+    light_filter_pie(ax)
+    ax.set_frame_on(True)
+
     plt.show()
 
 
