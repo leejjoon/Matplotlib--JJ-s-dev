@@ -7,33 +7,11 @@ import matplotlib.mlab as mlab
 
 mmm = []
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-def gauss(im, dpi):
-=======
 class BaseFilter(object):
     pass
 
 class GaussianFilter(BaseFilter):
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     "simple gauss filter"
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    pad = 5
-    ny, nx, depth = im.shape
-    new_alpha = np.zeros([pad*2+ny, pad*2+nx], dtype="d")
-    new_alpha[pad:-pad, pad:-pad] = np.sum(im[:,:,:3]*[0.3,0.3,0.3], axis=-1)*im[:,:,-1]
-    aaa = NI.grey_dilation(new_alpha, size=(3, 3))
-    alpha2 = NI.gaussian_filter(aaa, 2)
-    new_im = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
-    new_im[:,:,-1] = alpha2
-    new_im[:,:,:-1] = 0.
-    offsetx, offsety = -pad, -pad
-    mmm.append(im)
-    return new_im, offsetx, offsety
-
-
-
-def grow(im, dpi):
-=======
     def __init__(self, sigma, alpha=0.3, offsets=None, color=None):
         self.sigma = sigma
         self.alpha = alpha
@@ -64,20 +42,7 @@ def grow(im, dpi):
 
 
 class GrowFilter(BaseFilter):
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     "enlarge the area"
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    pad = 5
-    ny, nx, depth = im.shape
-    new_alpha = np.zeros([pad*2+ny, pad*2+nx], dtype="d")
-    new_alpha[pad:-pad, pad:-pad] = im[:,:,-1]
-    alpha2 = NI.grey_dilation(new_alpha, size=(3, 3))
-    new_im = np.zeros([pad*2+ny, pad*2+nx, depth], dtype="d")
-    new_im[:,:,-1] = alpha2
-    new_im[:,:,:-1] = 1.
-    offsetx, offsety = -pad, -pad
-    return new_im, offsetx, offsety
-=======
     def __init__(self, pixels, color=None):
         self.pixels = pixels
         if color is None:
@@ -98,7 +63,6 @@ class GrowFilter(BaseFilter):
         offsetx, offsety = -pad, -pad
 
         return new_im, offsetx, offsety
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
 
 
 from matplotlib.artist import Artist
@@ -159,13 +123,8 @@ def filtered_text(ax):
     for t in cl:
         t.set_color("k")
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    # Add white background to improve visibility of labels.
-    white_glows = FilteredArtistList(cl, grow)
-=======
     # Add white glows to improve visibility of labels.
     white_glows = FilteredArtistList(cl, GrowFilter(3))
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     ax.add_artist(white_glows)
     white_glows.set_zorder(cl[0].get_zorder()-0.1)
 
@@ -178,24 +137,12 @@ def drop_shadow_line(ax):
 
     # draw lines
     l1, = ax.plot([0.1, 0.5, 0.9], [0.1, 0.9, 0.5], "bo-",
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-                  mec="b", lw=5, ms=10, label="Line 1")
-    l2, = ax.plot([0.1, 0.5, 0.9], [0.5, 0.2, 0.7], "r-",
-                  mec="r", lw=5, ms=10, color="r", label="Line 2")
-=======
                   mec="b", mfc="w", lw=5, mew=3, ms=10, label="Line 1")
     l2, = ax.plot([0.1, 0.5, 0.9], [0.5, 0.2, 0.7], "ro-",
                   mec="r", mfc="w", lw=5, mew=3, ms=10, label="Line 1")
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    #l1.set_rasterized(True) # to support mixed-mode renderers
-    l1.set_visible(False)
-    l2.set_visible(False)
-=======
     
     gauss = GaussianFilter(2)
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     
     for l in [l1, l2]:
 
@@ -205,10 +152,6 @@ def drop_shadow_line(ax):
         yy = l.get_ydata()
         shadow, = ax.plot(xx, yy)
         shadow.update_from(l)
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-        shadow.set_visible(True)
-=======
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
 
         # offset transform
         ot = mtransforms.offset_copy(l.get_transform(), ax.figure,
@@ -231,8 +174,6 @@ def drop_shadow_line(ax):
     ax.xaxis.set_visible(False)
     ax.yaxis.set_visible(False)
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-=======
 
 
 
@@ -260,43 +201,23 @@ def drop_shadow_patches(ax):
     ax.xaxis.set_visible(False)
     ax.yaxis.set_visible(False)
 
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     
 
     
 if 1:
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    plt.figure(figsize=(6, 3))
-=======
     plt.figure(figsize=(8, 3))
     plt.subplots_adjust(left=0.05, right=0.95)
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    #ax = plt.subplot(121)
-    #filtered_text(ax)
-=======
     ax = plt.subplot(131)
     filtered_text(ax)
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
 
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-    ax = plt.subplot(122)
-=======
     ax = plt.subplot(132)
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     drop_shadow_line(ax)
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-=======
 
     ax = plt.subplot(133)
     drop_shadow_patches(ax)
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
     
     plt.show()
-<<<<<<< HEAD:examples/pylab_examples/demo_agg_filter.py
-=======
 
 
->>>>>>> agg_filter:examples/pylab_examples/demo_agg_filter.py
