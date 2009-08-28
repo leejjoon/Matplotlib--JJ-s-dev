@@ -290,6 +290,9 @@ class AxisArtistHelper(object):
             return tr, va, ha, a
 
 
+        def get_ticklabel_iterators(self, axes):
+            return self.get_tick_iterators(axes)
+
 
     class Fixed(_Base):
         """
@@ -393,7 +396,7 @@ class AxisArtistHelper(object):
 
             self.nth_coord = nth_coord
 
-            self._value = value 
+            self._value = value
 
             super(AxisArtistHelper.Floating,
                   self).__init__(label_direction)
@@ -855,10 +858,10 @@ class TickLabels(mtext.Text):
             dd = 5 + renderer.points_to_pixels(self.get_size())
 
             for (x, y), a, l in self.locs_angles_labels:
-                theta = (a+90.)/180.*np.pi
+                theta = (a-90.)/180.*np.pi
                 dx, dy = dd * np.cos(theta), dd * np.sin(theta)
                 offset_tr.translate(dx, dy)
-                self.set_rotation(a-180)
+                self.set_rotation(a)
                 self.set_x(x)
                 self.set_y(y)
                 self.set_text(l)
@@ -1160,8 +1163,8 @@ class AxisArtist(martist.Artist):
 
         majortick_iter,  minortick_iter = \
                         self._axis_artist_helper.get_tick_iterators(self.axes)
-
-        tick_loc_angle_label = list(majortick_iter)
+        majorticklabel_iter,  minorticklabel_iter = \
+                        self._axis_artist_helper.get_ticklabel_iterators(self.axes)
 
         transform=self._axis_artist_helper.get_tick_transform(self.axes) \
                    + self.offset_transform
@@ -1181,7 +1184,10 @@ class AxisArtist(martist.Artist):
         self.major_ticklabels.set_transform(trans)
 
 
+        tick_loc_angle_label = list(majortick_iter)
         self.major_ticks.update_ticks(tick_loc_angle_label, renderer)
+        #tick_loc_angle_label = self._adjust_ticklabel_angle(tick_loc_angle_label, renderer)
+        tick_loc_angle_label = list(majorticklabel_iter)
         self.major_ticklabels.update_ticks(tick_loc_angle_label, renderer)
 
         self.major_ticks.draw(renderer)

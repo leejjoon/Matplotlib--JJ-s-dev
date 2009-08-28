@@ -178,32 +178,94 @@ class FloatingAxisArtistHelper(AxisArtistHelper.Floating):
 
         grid_finder = self.grid_helper.grid_finder
 
+        lat_levs, lat_n, lat_factor = self.grid_info["lat_info"]
+        if lat_factor is not None:
+            yy0 = lat_levs / lat_factor
+            dy = 0.01 / lat_factor
+        else:
+            yy0 = lat_levs
+            dy = 0.01
+
+        lon_levs, lon_n, lon_factor = self.grid_info["lon_info"]
+        if lon_factor is not None:
+            xx0 = lon_levs / lon_factor
+            dx = 0.01 / lon_factor
+        else:
+            xx0 = lon_levs
+            dx = 0.01
+
         # find angles
         if self.nth_coord == 0:
-            lat_levs, lat_n, lat_factor = self.grid_info["lat_info"]
-            if lat_factor is not None:
-                yy0 = lat_levs / lat_factor
-                dy = 0.01 / lat_factor
-            else:
-                yy0 = lat_levs
-                dy = 0.01
             xx0 = np.empty_like(yy0)
             xx0.fill(self.value)
             xx1, yy1 = grid_finder.transform_xy(xx0, yy0)
-            xx2, yy2 = grid_finder.transform_xy(xx0, yy0+dy)
+            xx2, yy2 = grid_finder.transform_xy(xx0-dx, yy0)
+            xx3, yy3 = grid_finder.transform_xy(xx0, yy0-dy)
             labels = self.grid_info["lat_labels"]
         elif self.nth_coord == 1:
-            lon_levs, lon_n, lon_factor = self.grid_info["lon_info"]
-            if lon_factor is not None:
-                xx0 = lon_levs / lon_factor
-                dx = 0.01 / lon_factor
-            else:
-                xx0 = lon_levs
-                dx = 0.01
             yy0 = np.empty_like(xx0)
             yy0.fill(self.value)
             xx1, yy1 = grid_finder.transform_xy(xx0, yy0)
-            xx2, yy2 = grid_finder.transform_xy(xx0+dx, yy0)
+            xx2, yy2 = grid_finder.transform_xy(xx0, yy0-dy)
+            xx3, yy3 = grid_finder.transform_xy(xx0-dx, yy0)
+            labels = self.grid_info["lon_labels"]
+
+        if self.label_direction == "top":
+            da = 180.-90.
+        else:
+            da = 0.-90.
+
+        def f1():
+            dd = np.arctan2(yy2-yy1, xx2-xx1) # angle for ticks
+            dd2 = np.arctan2(yy3-yy1, xx3-xx1) # angle for labels
+            #dd = np.arctan2(xx2-xx1, yy2-yy1)
+            trans_tick = self.get_tick_transform(axes)
+            tr2ax = trans_tick + axes.transAxes.inverted()
+            for x, y, d, d2, lab in zip(xx1, yy1, dd, dd2, labels):
+                c2 = tr2ax.transform_point((x, y))
+                delta=0.00001
+                if (0. -delta<= c2[0] <= 1.+delta) and \
+                       (0. -delta<= c2[1] <= 1.+delta):
+                    yield [x, y], d/3.14159*180.+da, lab
+                    #, d2/3.14159*180.+da)
+
+        return f1(), iter([])
+
+    def get_ticklabel_iterators(self, axes):
+        """tick_loc, tick_angle, tick_label"""
+
+        grid_finder = self.grid_helper.grid_finder
+
+        lat_levs, lat_n, lat_factor = self.grid_info["lat_info"]
+        if lat_factor is not None:
+            yy0 = lat_levs / lat_factor
+            dy = 0.01 / lat_factor
+        else:
+            yy0 = lat_levs
+            dy = 0.01
+
+        lon_levs, lon_n, lon_factor = self.grid_info["lon_info"]
+        if lon_factor is not None:
+            xx0 = lon_levs / lon_factor
+            dx = 0.01 / lon_factor
+        else:
+            xx0 = lon_levs
+            dx = 0.01
+
+        # find angles
+        if self.nth_coord == 0:
+            xx0 = np.empty_like(yy0)
+            xx0.fill(self.value)
+            xx1, yy1 = grid_finder.transform_xy(xx0, yy0)
+            xx2, yy2 = grid_finder.transform_xy(xx0-dx, yy0)
+            xx3, yy3 = grid_finder.transform_xy(xx0, yy0-dy)
+            labels = self.grid_info["lat_labels"]
+        elif self.nth_coord == 1:
+            yy0 = np.empty_like(xx0)
+            yy0.fill(self.value)
+            xx1, yy1 = grid_finder.transform_xy(xx0, yy0)
+            xx2, yy2 = grid_finder.transform_xy(xx0, yy0-dy)
+            xx3, yy3 = grid_finder.transform_xy(xx0+dx, yy0)
             labels = self.grid_info["lon_labels"]
 
         if self.label_direction == "top":
@@ -212,15 +274,18 @@ class FloatingAxisArtistHelper(AxisArtistHelper.Floating):
             da = 0.
 
         def f1():
-            dd = np.arctan2(yy2-yy1, xx2-xx1)
+            dd = np.arctan2(yy2-yy1, xx2-xx1) # angle for ticks
+            dd2 = np.arctan2(yy3-yy1, xx3-xx1) # angle for labels
+            #dd = np.arctan2(xx2-xx1, yy2-yy1)
             trans_tick = self.get_tick_transform(axes)
             tr2ax = trans_tick + axes.transAxes.inverted()
-            for x, y, d, lab in zip(xx1, yy1, dd, labels):
+            for x, y, d, d2, lab in zip(xx1, yy1, dd, dd2, labels):
                 c2 = tr2ax.transform_point((x, y))
                 delta=0.00001
                 if (0. -delta<= c2[0] <= 1.+delta) and \
                        (0. -delta<= c2[1] <= 1.+delta):
-                    yield [x, y], d/3.14159*180.+da, lab
+                    yield [x, y], d2/3.14159*180.+da, lab
+                    #, d2/3.14159*180.+da)
 
         return f1(), iter([])
 
