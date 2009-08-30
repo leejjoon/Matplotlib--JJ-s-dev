@@ -167,7 +167,7 @@ class AxisArtistHelper(object):
             # iter : iteratoable object that yields (c, angle, l) where
             # c, angle, l is position, tick angle, and label
 
-            return iter_major, iter_minot
+            return iter_major, iter_minor
 
 
         """
@@ -284,7 +284,8 @@ class AxisArtistHelper(object):
             """
 
             tr, va, ha = self._get_label_offset_transform( \
-                pad_points, fontprops, renderer, None)
+                               pad_points, fontprops, renderer, None)
+
 
             a = self._ticklabel_angles[self.label_direction]
             return tr, va, ha, a
@@ -435,7 +436,7 @@ class AxisArtistHelperRectlinear:
         def get_tick_iterators(self, axes):
             """tick_loc, tick_angle, tick_label"""
 
-            angle = 0 - 90 * self.nth_coord
+            angle = 90 - 90 * self.nth_coord
             if self.passthru_pt[1 - self.nth_coord] > 0.5:
                 angle = 180+angle
 
@@ -535,7 +536,7 @@ class AxisArtistHelperRectlinear:
         def get_tick_iterators(self, axes):
             """tick_loc, tick_angle, tick_label"""
 
-            angle = 0 - 90 * self.nth_coord
+            angle = 90 - 90 * self.nth_coord
 
             major = self.axis.major
             majorLocs = major.locator()
@@ -751,7 +752,7 @@ class Ticks(Line2D):
     def update_ticks(self, locs_angles_labels, renderer):
         self.locs_angles_labels = locs_angles_labels
 
-    _tickvert_path = Path([[0., 0.], [0., 1.]])
+    _tickvert_path = Path([[0., 0.], [1., 0.]])
 
     def draw(self, renderer):
         if not self.get_visible():
@@ -788,7 +789,8 @@ class Ticks(Line2D):
         marker_scale = Affine2D().scale(offset, offset)
 
         tick_out = self.get_tick_out()
-        for loc, angle, _ in self.locs_angles_labels:
+        #for loc, angle, tick_lab, ticklab_angle in self.locs_angles_labels:
+        for loc, angle, tick_lab in self.locs_angles_labels:
 
             if tick_out:
                 angle += 180
@@ -1187,7 +1189,7 @@ class AxisArtist(martist.Artist):
         tick_loc_angle_label = list(majortick_iter)
         self.major_ticks.update_ticks(tick_loc_angle_label, renderer)
         #tick_loc_angle_label = self._adjust_ticklabel_angle(tick_loc_angle_label, renderer)
-        tick_loc_angle_label = list(majorticklabel_iter)
+        #tick_loc_angle_label = list(majorticklabel_iter)
         self.major_ticklabels.update_ticks(tick_loc_angle_label, renderer)
 
         self.major_ticks.draw(renderer)
@@ -1330,6 +1332,209 @@ class AxisArtist(martist.Artist):
             self.minor_ticklabels.set_visible(_ticklabels)
         if _label is not None:
             self.label.set_visible(_label)
+
+
+
+class TickLabelsFloating(TickLabels):
+
+    def draw(self, renderer):
+        if not self.get_visible(): return
+
+        # save original and adjust some properties
+        tr = self.get_transform()
+        rm = self.get_rotation_mode()
+
+        self.set_rotation_mode("anchor")
+        offset_tr = Affine2D()
+        self.set_transform(tr+offset_tr)
+
+        # estimate pad
+        dd = 5 + renderer.points_to_pixels(self.get_size())
+
+        for (x, y), a, l in self.locs_angles_labels:
+            theta = (a)/180.*np.pi
+            dx, dy = dd * np.cos(theta), dd * np.sin(theta)
+            offset_tr.translate(dx, dy)
+            self.set_rotation(a+90)
+            self.set_x(x)
+            self.set_y(y)
+            self.set_text(l)
+            super(TickLabels, self).draw(renderer)
+            offset_tr.clear()
+
+        # restore original properties
+        self.set_transform(tr)
+        self.set_rotation_mode(rm)
+
+
+
+
+
+class AxisArtistFloating(AxisArtist):
+
+    def _init_ticks(self):
+
+        transform=self._axis_artist_helper.get_tick_transform(self.axes) \
+                   + self.offset_transform
+
+        self.major_ticks = Ticks(self.major_tick_size,
+                                 axis=self.axis,
+                                 transform=transform)
+        self.minor_ticks = Ticks(self.minor_tick_size,
+                                 axis=self.axis,
+                                 transform=transform)
+
+
+        size = rcParams['xtick.labelsize']
+
+        fontprops = font_manager.FontProperties(size=size)
+        tvhl = self._axis_artist_helper.get_ticklabel_offset_transform( \
+            self.axes, self.major_tick_pad,
+            fontprops=fontprops, renderer=None)
+
+        trans, vert, horiz, label_a = tvhl
+        trans = transform + trans
+
+        # ignore ticklabel angle during the drawing time (but respect
+        # during init).  Instead, use angle set by the TickLabel
+        # artist.
+
+        self.major_ticklabels = TickLabelsFloating(size, axis=self.axis)
+        self.minor_ticklabels = TickLabelsFloating(size, axis=self.axis)
+
+
+        self.major_ticklabels.set(figure = self.axes.figure,
+                                  transform=trans,
+                                  va=vert,
+                                  ha=horiz,
+                                  fontproperties=fontprops)
+
+        self.minor_ticklabels.set(figure = self.axes.figure,
+                                  transform=trans,
+                                  va=vert,
+                                  ha=horiz,
+                                  fontproperties=fontprops)
+
+
+    def _get_tick_info(self, tick_iter):
+        ticks_loc_angle_label = []
+        ticklabels_loc_angle_label = []
+        for loc, angle_normal, angle_tangent, label in tick_iter:
+            angle_label = angle_tangent  - 90
+            if (angle_normal - angle_tangent) % 360 > 180:
+                angle_tick = angle_normal + 180
+            else:
+                angle_tick = angle_normal
+
+            ticks_loc_angle_label.append([loc, angle_tick, label])
+            ticklabels_loc_angle_label.append([loc, angle_label, label])
+
+        return ticks_loc_angle_label, ticklabels_loc_angle_label
+
+
+    def _draw_ticks(self, renderer):
+
+        if not hasattr(self._axis_artist_helper, "get_tick_iterators_floating"):
+            raise RuntimeError("The axis_artist_helper does not support get_tick_iterators_floating method")
+
+        majortick_iter,  minortick_iter = \
+                self._axis_artist_helper.get_tick_iterators_floating(self.axes)
+
+        transform=self._axis_artist_helper.get_tick_transform(self.axes) \
+                   + self.offset_transform
+        fontprops = font_manager.FontProperties(size=12)
+        tvhl = self._axis_artist_helper.get_ticklabel_offset_transform( \
+            self.axes,
+            self.major_tick_pad,
+            fontprops=fontprops,
+            renderer=renderer,
+            )
+
+        trans, va, ha, a = tvhl
+        trans = transform + trans
+
+        # ignore va, ha, angle during the drawing time
+
+        self.major_ticklabels.set_transform(trans)
+
+        tick_loc_angle_label, ticklabel_loc_angle_label \
+                              = self._get_tick_info(majortick_iter)
+
+        self.major_ticks.update_ticks(tick_loc_angle_label, renderer)
+        self.major_ticklabels.update_ticks(ticklabel_loc_angle_label, renderer)
+
+        self.major_ticks.draw(renderer)
+        self.major_ticklabels.draw(renderer)
+
+        tick_loc_angle_label = list(minortick_iter)
+
+        self.minor_ticks.update_ticks(tick_loc_angle_label, renderer)
+        self.minor_ticklabels.update_ticks(tick_loc_angle_label, renderer)
+
+        self.minor_ticks.draw(renderer)
+        self.minor_ticklabels.draw(renderer)
+
+        if (self.major_ticklabels.get_visible() or self.minor_ticklabels.get_visible()):
+            self._draw_offsetText(renderer)
+
+        return self.major_ticklabels.get_window_extents(renderer)
+
+
+
+    def _draw_label(self, renderer, bboxes):
+
+        if not self.label.get_visible():
+            return
+
+        fontprops = font_manager.FontProperties(size=rcParams['axes.labelsize'])
+
+        pad_points = self.major_tick_pad
+
+        if self.get_rotate_label_along_line():
+            xy, tr, label_a = self._axis_artist_helper.get_label_pos( \
+                    self.axes, with_angle=True)
+            if xy is None: return
+
+            x, y = xy
+
+            offset_tr = Affine2D()
+            if self.major_ticklabels.get_visible():
+                dd = renderer.points_to_pixels(self.major_ticklabels.get_size() \
+                                               + pad_points + 2*self.LABELPAD )
+            else:
+                dd = renderer.points_to_pixels(pad_points + 2*self.LABELPAD)
+
+            theta = label_a - 0.5 * np.pi #(label_a)/180.*np.pi
+            dx, dy = dd * np.cos(theta), dd * np.sin(theta)
+            offset_tr.translate(dx, dy)
+            tr2 = (tr+offset_tr) #+ tr2
+
+            self.label.set(x=x, y=y,
+                           rotation_mode="anchor",
+                           transform=tr2,
+                           va="center", ha="center",
+                           rotation=label_a/np.pi*180.)
+        else:
+            xy, tr = self._axis_artist_helper.get_label_pos(self.axes)
+            if xy is None: return
+
+            x, y = xy
+            tr2, va, ha, a = self._axis_artist_helper.get_label_offset_transform(\
+                self.axes,
+                pad_points+2*self.LABELPAD, fontprops,
+                renderer,
+                bboxes=bboxes,
+                )
+            tr2 = (tr+self.offset_transform) + tr2
+
+            self.label.set(x=x, y=y,
+                           transform=tr2,
+                           va=va, ha=ha, rotation=a)
+
+        self.label.draw(renderer)
+
+
+
 
 
 class Axes(maxes.Axes):
