@@ -193,7 +193,8 @@ class AxisArtistHelper(object):
         _ticklabel_angles = dict(left=0, right=0, bottom=0, top=0)
 
         def _get_label_offset_transform(self, pad_points, fontprops,
-                                        renderer, bboxes=None):
+                                        renderer, bboxes=None,
+                                        ascent_descent=None):
 
             """
             Returns (offset-transform, vertical-alignment, horiz-alignment)
@@ -241,14 +242,24 @@ class AxisArtistHelper(object):
                 return tr, "center", "left"
 
             elif self.label_direction == "bottom":
-                tr.translate(0, -(pad_pixels+font_size_pixels+h))
-
-                return tr, "baseline", "center"
+                if ascent_descent is not None:
+                    a, d = ascent_descent
+                    tr.translate(0, -(pad_pixels+a+h))
+                    return tr, "baseline", "center"
+                else:
+                    tr.translate(0, -(pad_pixels+h))
+                    return tr, "top", "center"
 
             elif self.label_direction == "top":
-                tr.translate(0, +(pad_pixels+h))
-
-                return tr, "baseline", "center"
+                if ascent_descent is not None:
+                    a, d = ascent_descent
+                    tr.translate(0, +(pad_pixels+d+h))
+                    return tr, "baseline", "center"
+                else:
+                    # 0.3 for fraction for descent
+                    #d = font_size_pixels *0.7
+                    tr.translate(0, +(pad_pixels+h))
+                    return tr, "bottom", "center"
 
             elif self.label_direction == "curved":
                 #tr.translate(0, +(pad_pixels+h))
@@ -278,14 +289,14 @@ class AxisArtistHelper(object):
         def get_ticklabel_offset_transform(self, axes,
                                            pad_points, fontprops,
                                            renderer,
+                                           ascent_descent=None
                                            ):
             """
             offset transform for ticklabels.
             """
 
             tr, va, ha = self._get_label_offset_transform( \
-                               pad_points, fontprops, renderer, None)
-
+                pad_points, fontprops, renderer, None, ascent_descent)
 
             a = self._ticklabel_angles[self.label_direction]
             return tr, va, ha, a
@@ -893,6 +904,17 @@ class TickLabels(mtext.Text):
         return [b for b in bboxes if b.width!=0 or b.height!=0]
 
 
+    def get_text_ascent_descent(self, renderer):
+        a_list, d_list =[0], [0]
+        for (x, y), a, l in self.locs_angles_labels:
+            clean_line, ismath = self.is_math_text(l)
+            w, h, d = renderer.get_text_width_height_descent(
+                clean_line, self._fontproperties, ismath=ismath)
+            a_list.append(h-d)
+            d_list.append(d)
+
+        return max(a_list), max(d_list)
+
 
 
 class AxisLabel(mtext.Text):
@@ -1060,7 +1082,7 @@ class AxisArtist(martist.Artist):
         return the current axisline style.
         """
         return self._axisline_style
-        
+
     def _init_line(self):
         """
         Initialize the *line* artist that is responsible to draw the axis line.
@@ -1102,7 +1124,7 @@ class AxisArtist(martist.Artist):
         fontprops = font_manager.FontProperties(size=size)
         tvhl = self._axis_artist_helper.get_ticklabel_offset_transform( \
             self.axes, self.major_tick_pad,
-            fontprops=fontprops, renderer=None)
+            fontprops=fontprops, renderer=None, ascent_descent=(0,0))
 
         trans, vert, horiz, label_a = tvhl
         trans = transform + trans
@@ -1163,19 +1185,28 @@ class AxisArtist(martist.Artist):
 
     def _draw_ticks(self, renderer):
 
+        transform=self._axis_artist_helper.get_tick_transform(self.axes) \
+                   + self.offset_transform
+
         majortick_iter,  minortick_iter = \
                         self._axis_artist_helper.get_tick_iterators(self.axes)
         majorticklabel_iter,  minorticklabel_iter = \
                         self._axis_artist_helper.get_ticklabel_iterators(self.axes)
 
-        transform=self._axis_artist_helper.get_tick_transform(self.axes) \
-                   + self.offset_transform
-        fontprops = font_manager.FontProperties(size=12)
+        tick_loc_angle_label = list(majortick_iter)
+
+        self.major_ticks.update_ticks(tick_loc_angle_label, renderer)
+        self.major_ticklabels.update_ticks(tick_loc_angle_label, renderer)
+
+        fontprops = self.major_ticklabels._fontproperties
+
+        a, d = self.major_ticklabels.get_text_ascent_descent(renderer)
         tvhl = self._axis_artist_helper.get_ticklabel_offset_transform( \
             self.axes,
             self.major_tick_pad,
             fontprops=fontprops,
             renderer=renderer,
+            ascent_descent=(a, d)
             )
 
         trans, va, ha, a = tvhl
@@ -1185,20 +1216,28 @@ class AxisArtist(martist.Artist):
 
         self.major_ticklabels.set_transform(trans)
 
-
-        tick_loc_angle_label = list(majortick_iter)
-        self.major_ticks.update_ticks(tick_loc_angle_label, renderer)
-        #tick_loc_angle_label = self._adjust_ticklabel_angle(tick_loc_angle_label, renderer)
-        #tick_loc_angle_label = list(majorticklabel_iter)
-        self.major_ticklabels.update_ticks(tick_loc_angle_label, renderer)
-
         self.major_ticks.draw(renderer)
         self.major_ticklabels.draw(renderer)
 
+        # minor ticks
         tick_loc_angle_label = list(minortick_iter)
 
         self.minor_ticks.update_ticks(tick_loc_angle_label, renderer)
         self.minor_ticklabels.update_ticks(tick_loc_angle_label, renderer)
+
+        fontprops = self.minor_ticklabels._fontproperties
+
+        a, d = self.minor_ticklabels.get_text_ascent_descent(renderer)
+        tvhl = self._axis_artist_helper.get_ticklabel_offset_transform( \
+            self.axes,
+            self.minor_tick_pad,
+            fontprops=fontprops,
+            renderer=renderer,
+            ascent_descent=(a, d)
+            )
+
+        trans, va, ha, a = tvhl
+        trans = transform + trans
 
         self.minor_ticks.draw(renderer)
         self.minor_ticklabels.draw(renderer)
@@ -1246,9 +1285,9 @@ class AxisArtist(martist.Artist):
             offset_tr = Affine2D()
             if self.major_ticklabels.get_visible():
                 dd = renderer.points_to_pixels(self.major_ticklabels.get_size() \
-                                               + pad_points + 2*self.LABELPAD )
+                                               + pad_points + self.LABELPAD )
             else:
-                dd = renderer.points_to_pixels(pad_points + 2*self.LABELPAD)
+                dd = renderer.points_to_pixels(pad_points + self.LABELPAD)
 
             theta = label_a - 0.5 * np.pi #(label_a)/180.*np.pi
             dx, dy = dd * np.cos(theta), dd * np.sin(theta)
@@ -1267,7 +1306,7 @@ class AxisArtist(martist.Artist):
             x, y = xy
             tr2, va, ha, a = self._axis_artist_helper.get_label_offset_transform(\
                 self.axes,
-                pad_points+2*self.LABELPAD, fontprops,
+                pad_points+self.LABELPAD, fontprops,
                 renderer,
                 bboxes=bboxes,
                 )
@@ -1781,7 +1820,7 @@ if __name__ == "__main__":
     ax.axis["xzero"].set_visible(True)
     ax.axis["xzero"].label.set_text("Axis Zero")
 
-    for n in ["bottom", "top", "right"]:
+    for n in ["top", "right"]:
         ax.axis[n].set_visible(False)
 
     xx = np.arange(0, 2*np.pi, 0.01)
