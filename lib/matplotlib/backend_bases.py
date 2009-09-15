@@ -59,7 +59,8 @@ class RendererBase:
     """
     def __init__(self):
         self._texmanager = None
-        self._text2path = textpath.text_to_path
+
+        self._text2path = textpath.TextToPath()
 
     def open_group(self, s, gid=None):
         """
@@ -340,8 +341,9 @@ class RendererBase:
         return False
 
     def draw_tex(self, gc, x, y, s, prop, angle, ismath='TeX!'):
-        self.draw_text_as_path(gc, x, y, s, prop, angle, ismath="TeX")
-        #raise NotImplementedError
+        """
+        """
+        self._draw_text_as_path(gc, x, y, s, prop, angle, ismath="TeX")
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False):
         """
@@ -376,10 +378,10 @@ class RendererBase:
         to if 1, and then the actual bounding box will be blotted along with
         your text.
         """
-        #raise NotImplementedError
-        self.draw_text_as_path(gc, x, y, s, prop, angle, ismath)
 
-    def draw_text_as_path(self, gc, x, y, s, prop, angle, ismath):
+        self._draw_text_as_path(gc, x, y, s, prop, angle, ismath)
+
+    def _draw_text_as_path(self, gc, x, y, s, prop, angle, ismath):
         """
         draw the text by converting them to paths using textpath module.
 
@@ -394,14 +396,12 @@ class RendererBase:
 
         *ismath*
           If True, use mathtext parser. If "TeX", use *usetex* mode.
-
-          
         """
         
         text2path = self._text2path
         color = gc.get_rgb()[:3]
-        fontsize = prop.get_size_in_points()
-
+        fontsize = self.points_to_pixels(prop.get_size_in_points())
+        
         if ismath == "TeX":
             verts, codes = text2path.get_text_path(prop, s, ismath=False, usetex=True)
         else:
