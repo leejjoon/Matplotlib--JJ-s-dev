@@ -7725,6 +7725,200 @@ class Axes(martist.Artist):
         self.yaxis.set_minor_locator(mticker.NullLocator())
 
 
+
+class GridSpec(object):
+    def __init__(self, nrows, ncols, 
+                 left=None, bottom=None, right=None, top=None,
+                 wspace=None, hspace=None):
+        #self.figure = figure
+        self._nrows , self._ncols = nrows, ncols
+        self.left=left
+        self.bottom=bottom
+        self.right=right
+        self.top=top
+        self.wspace=wspace
+        self.hspace=hspace
+
+    def get_geometry(self):
+        return self._nrows, self._ncols
+    
+    _AllowedKeys = ["left", "bottom", "right", "top", "wspace", "hspace"]
+    
+    def update(self, **kwargs):
+        """
+        Update the current values.  If any kwarg is None, default to
+        the current value, if set, otherwise to rc
+
+        """
+
+        for k, v in kwargs.items():
+            if k in self._AllowedKeys:
+                setattr(self, k, v)
+            else:
+                raise AttributeError("%s is unknown keyword" % (k,))
+
+
+        from matplotlib import _pylab_helpers
+        for figmanager in _pylab_helpers.Gcf.figs.values():
+            for ax in figmanager.canvas.figure.axes:
+                # copied from Figure.subplots_adjust
+                if not isinstance(ax, SubplotBase):
+                    # Check if sharing a subplots axis
+                    if ax._sharex is not None and isinstance(ax._sharex, SubplotBase):
+                        ax._sharex.update_params()
+                        ax.set_position(ax._sharex.figbox)
+                    elif ax._sharey is not None and isinstance(ax._sharey,SubplotBase):
+                        ax._sharey.update_params()
+                        ax.set_position(ax._sharey.figbox)
+                else:
+                    ax.update_params()
+                    ax.set_position(ax.figbox)
+                    
+            
+    def get_subplot_params(self, fig=None):
+        from matplotlib.figure import SubplotParams
+        import copy
+        if fig is None:
+            kw = dict([(k, rcParams["figure.subplot."+k]) \
+                       for k in self._AllowedKeys])
+            subplotpars = SubplotParams(**kw)
+        else:
+            subplotpars = copy.copy(fig.subplotpars)
+
+        update_kw = dict([(k, getattr(self, k)) for k in self._AllowedKeys])
+        subplotpars.update(**update_kw)
+
+        return subplotpars
+
+
+    def new_subplotspec(self, loc, rowspan=1, colspan=1):
+        """
+        return SuplotSpec instance
+        """
+        loc1, loc2 = loc
+        subplotspec = self[loc1:loc1+rowspan, loc2:loc2+colspan]
+        return subplotspec
+    
+
+    def __getitem__(self, key):
+        """
+        return SuplotSpec instance
+        """
+        nrows, ncols = self.get_geometry()
+        total = nrows*ncols
+        
+        if isinstance(key, tuple):
+            try:
+                k1, k2 = key
+            except ValueError:
+                raise ValueError("unrecognized subplot spec")
+
+            if isinstance(k1, slice):
+                row1, row2, _ = k1.indices(nrows)
+            else:
+                if k1 < 0:
+                    k1 += nrows
+                row1, row2 = k1, k1+1
+
+
+            if isinstance(k2, slice):
+                col1, col2, _ = k2.indices(ncols)
+            else:
+                if k2 < 0:
+                    k2 += ncols
+                col1, col2 = k2, k2+1
+
+
+            num1 = row1*nrows + col1
+            num2 = (row2-1)*nrows + (col2-1)
+
+        # single key
+        else:
+            if isinstance(key, slice):
+                num1, num2, _ = key.indices(total)
+                num2 -= 1
+            else:
+                if key < 0:
+                    key += total
+                num1, num2 = key, None
+
+
+        return SubplotSpec(self, num1, num2)
+
+
+
+class SubplotSpec(object):
+    def __init__(self, gridspec, num1, num2=None):
+
+        rows, cols = gridspec.get_geometry()
+        total = rows*cols
+
+        self._gridspec = gridspec
+        self.num1 = num1
+        self.num2 = num2
+
+    def get_gridspec(self):
+        return self._gridspec
+
+    
+    def get_geometry(self):
+        'get the subplot geometry, eg 2,2,3. Unlike SuplorParams, index is 0-based'
+        rows, cols = self.get_gridspec().get_geometry()
+        #if (self.num2 is None) or (self.num1 == self.num2):
+        return rows, cols, self.num1, self.num2
+            
+
+    def get_position(self, fig, return_all=False):
+        'update the subplot position from fig.subplotpars'
+
+        gridspec = self.get_gridspec()
+        rows, cols = gridspec.get_geometry()
+
+        subplot_params = gridspec.get_subplot_params(fig)
+        left = subplot_params.left
+        right = subplot_params.right
+        bottom = subplot_params.bottom
+        top = subplot_params.top
+        wspace = subplot_params.wspace
+        hspace = subplot_params.hspace
+        totWidth = right-left
+        totHeight = top-bottom
+
+        figH = totHeight/(rows + hspace*(rows-1))
+        sepH = hspace*figH
+
+        figW = totWidth/(cols + wspace*(cols-1))
+        sepW = wspace*figW
+
+        rowNum, colNum =  divmod(self.num1, cols)
+        figBottom = top - (rowNum+1)*figH - rowNum*sepH
+        figLeft = left + colNum*(figW + sepW)
+        figTop = figBottom + figH
+        figRight = figLeft + figW
+
+        if self.num2 is not None:
+
+            rowNum2, colNum2 =  divmod(self.num2, cols)
+            figBottom2 = top - (rowNum2+1)*figH - rowNum2*sepH
+            figLeft2 = left + colNum2*(figW + sepW)
+            figTop2 = figBottom2 + figH
+            figRight2 = figLeft2 + figW
+
+            figBottom = min(figBottom, figBottom2)
+            figLeft = min(figLeft, figLeft2)
+            figTop = max(figTop, figTop2)
+            figRight = max(figRight, figRight2)
+            
+        figbox = mtransforms.Bbox.from_extents(figLeft, figBottom,
+                                               figRight, figTop)
+
+
+        if return_all:
+            return figbox, rowNum, colNum, rows, cols
+        else:
+            return figbox
+
+
 class SubplotBase:
     """
     Base class for subplots, which are :class:`Axes` instances with
@@ -7748,25 +7942,28 @@ class SubplotBase:
 
         self.figure = fig
 
-        if len(args)==1:
-            s = str(args[0])
-            if len(s) != 3:
-                raise ValueError('Argument to subplot must be a 3 digits long')
-            rows, cols, num = map(int, s)
+        if len(args) == 1:
+            if isinstance(args[0], SubplotSpec):
+                self._subplotspec = args[0]
+            
+            else:
+                s = str(args[0])
+                if len(s) != 3:
+                    raise ValueError('Argument to subplot must be a 3 digits long')
+                rows, cols, num = map(int, s)
+                self._subplotspec = GridSpec(rows, cols)[num-1]
+                # num - 1 for converting from matlab to python indexing
         elif len(args)==3:
             rows, cols, num = args
+            self._subplotspec = GridSpec(rows, cols)[num-1]
+                # num - 1 for converting from matlab to python indexing
         else:
             raise ValueError(  'Illegal argument to subplot')
 
 
-        total = rows*cols
-        num -= 1    # convert from matlab to python indexing
-                    # ie num in range(0,total)
-        if num >= total:
-            raise ValueError( 'Subplot number exceeds total subplots')
-        self._rows = rows
-        self._cols = cols
-        self._num = num
+        #self._rows = rows
+        #self._cols = cols
+        #self._num = num
 
         self.update_params()
 
@@ -7775,63 +7972,31 @@ class SubplotBase:
 
     def get_geometry(self):
         'get the subplot geometry, eg 2,2,3'
-        return self._rows, self._cols, self._num+1
+        rows, cols, num1, num2 = self.get_subplotspec().get_geometry()
+        return rows, cols, num1+1 # for compatibility
 
     # COVERAGE NOTE: Never used internally or from examples
     def change_geometry(self, numrows, numcols, num):
         'change subplot geometry, eg. from 1,1,1 to 2,2,3'
-        self._rows = numrows
-        self._cols = numcols
-        self._num = num-1
+        #self._rows = numrows
+        #self._cols = numcols
+        #self._num = num-1
+        self._subplotspec = GridSpec(numrows, numcols)[num-1]
         self.update_params()
         self.set_position(self.figbox)
 
+    def get_subplotspec(self):
+        return self._subplotspec
+
+    def set_subplotspec(self, subplotspec):
+        self._subplotspec = subplotspec
+    
     def update_params(self):
         'update the subplot position from fig.subplotpars'
 
-        rows = self._rows
-        cols = self._cols
-        num = self._num
-
-        pars = self.figure.subplotpars
-        left = pars.left
-        right = pars.right
-        bottom = pars.bottom
-        top = pars.top
-        wspace = pars.wspace
-        hspace = pars.hspace
-        totWidth = right-left
-        totHeight = top-bottom
-
-        figH = totHeight/(rows + hspace*(rows-1))
-        sepH = hspace*figH
-
-        figW = totWidth/(cols + wspace*(cols-1))
-        sepW = wspace*figW
-
-        rowNum, colNum =  divmod(num, cols)
-
-        figBottom = top - (rowNum+1)*figH - rowNum*sepH
-        figLeft = left + colNum*(figW + sepW)
-
-        self.figbox = mtransforms.Bbox.from_bounds(figLeft, figBottom,
-                                                   figW, figH)
-        self.rowNum = rowNum
-        self.colNum = colNum
-        self.numRows = rows
-        self.numCols = cols
-
-        if 0:
-            print 'rcn', rows, cols, num
-            print 'lbrt', left, bottom, right, top
-            print 'self.figBottom', self.figBottom
-            print 'self.figLeft', self.figLeft
-            print 'self.figW', self.figW
-            print 'self.figH', self.figH
-            print 'self.rowNum', self.rowNum
-            print 'self.colNum', self.colNum
-            print 'self.numRows', self.numRows
-            print 'self.numCols', self.numCols
+        self.figbox, self.rowNum, self.colNum, self.numRows, self.numCols = \
+                     self.get_subplotspec().get_position(self.figure,
+                                                         return_all=True)
 
 
     def is_first_col(self):

@@ -648,6 +648,42 @@ def subplot(*args, **kwargs):
     draw_if_interactive()
     return a
 
+from matplotlib.axes import GridSpec
+def subplot2grid(shape, loc, rowspan=1, colspan=1, **kwargs):
+    """
+
+    It creates a subplot in a grid of *shape*, at location of *loc*, 
+    spanning *rowspan*, *colspan* cells in each direction.
+    The index for loc is 0-based. ::
+
+      subplot2grid(shape, loc, rowspan=1, colspan=1)
+
+    is identical to ::
+
+      gridspec=GridSpec(shape[0], shape[2])
+      subplotspec=gridspec.new_subplotspec(loc, rowspan, colspan)
+      subplot(subplotspec)
+
+
+    """
+
+    fig = gcf()
+    s1, s2 = shape
+    subplotspec = GridSpec(s1, s2).new_subplotspec(loc,
+                                                   rowspan=rowspan,
+                                                   colspan=colspan)
+    a = fig.add_subplot(subplotspec, **kwargs)
+    bbox = a.bbox
+    byebye = []
+    for other in fig.axes:
+        if other==a: continue
+        if bbox.fully_overlaps(other.bbox):
+            byebye.append(other)
+    for ax in byebye: delaxes(ax)
+
+    draw_if_interactive()
+    return a
+
 
 def twinx(ax=None):
     """
