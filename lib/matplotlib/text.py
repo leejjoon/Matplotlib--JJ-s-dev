@@ -278,21 +278,25 @@ class Text(Artist):
         horizLayout = np.zeros((len(lines), 4))
 
         if self.get_path_effects():
-            get_text_width_height_descent = RendererBase.get_text_width_height_descent
+            def get_text_width_height_descent(*kl, **kwargs):
+                RendererBase.get_text_width_height_descent(renderer,
+                                                           *kl, **kwargs)
         else:
-            get_text_width_height_descent = renderer.__class__.get_text_width_height_descent
-        
+            get_text_width_height_descent = renderer.get_text_width_height_descent
+
         # Find full vertical extent of font,
         # including ascenders and descenders:
-        tmp, lp_h, lp_bl = get_text_width_height_descent(renderer,
-                'lp', self._fontproperties, ismath=False)
+        tmp, lp_h, lp_bl = get_text_width_height_descent('lp',
+                                                         self._fontproperties,
+                                                         ismath=False)
         offsety = lp_h * self._linespacing
 
         baseline = None
         for i, line in enumerate(lines):
             clean_line, ismath = self.is_math_text(line)
-            w, h, d = get_text_width_height_descent(renderer,
-                clean_line, self._fontproperties, ismath=ismath)
+            w, h, d = get_text_width_height_descent(clean_line,
+                                                    self._fontproperties,
+                                                    ismath=ismath)
             if baseline is None:
                 baseline = h - d
             whs[i] = w, h
@@ -414,7 +418,7 @@ class Text(Artist):
     def get_path_effects(self):
         return self._path_effects
 
-        
+
     def set_bbox(self, rectprops):
         """
         Draw a bounding box around self.  rectprops are any settable
