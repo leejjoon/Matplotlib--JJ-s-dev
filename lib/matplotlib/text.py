@@ -279,8 +279,8 @@ class Text(Artist):
 
         if self.get_path_effects():
             def get_text_width_height_descent(*kl, **kwargs):
-                RendererBase.get_text_width_height_descent(renderer,
-                                                           *kl, **kwargs)
+                return RendererBase.get_text_width_height_descent(renderer,
+                                                                  *kl, **kwargs)
         else:
             get_text_width_height_descent = renderer.get_text_width_height_descent
 

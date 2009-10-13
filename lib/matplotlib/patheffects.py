@@ -3,7 +3,7 @@ import matplotlib.transforms as transforms
 
 
 
-class PathEffets(object):
+class PathEffects(object):
     """
     """
 
@@ -24,7 +24,7 @@ class PathEffets(object):
             """
             initializtion.
             """
-            super(PathEffets._Base, self).__init__()
+            super(PathEffects._Base, self).__init__()
 
 
         def draw_path(self, renderer, gc, tpath, affine, rgbFace):
@@ -85,7 +85,7 @@ class PathEffets(object):
             """
             initializtion.
             """
-            super(PathEffets.Stroke, self).__init__()
+            super(PathEffects.Stroke, self).__init__()
             self._width = width
             self._color = color
 
@@ -106,7 +106,7 @@ class PathEffets(object):
 
         def draw_path(self, renderer, gc, tpath, affine, rgbFace):
 
-            PathEffets.Stroke.draw_path(self, renderer, gc, tpath, affine, rgbFace)
+            PathEffects.Stroke.draw_path(self, renderer, gc, tpath, affine, rgbFace)
             renderer.draw_path(gc, tpath, affine, rgbFace)
 
 
@@ -114,11 +114,11 @@ class PathEffets(object):
 if __name__ == '__main__':
     clf()
     imshow([[1,2],[2,3]])
-    #eff = PathEffets.Thicken()
+    #eff = PathEffects.Thicken()
     txt = annotate("test", (1., 1.), (0., 0),
                    arrowprops=dict(arrowstyle="->", connectionstyle="angle3", lw=2),
                    size=12, ha="center")
-    txt.set_path_effects([PathEffets.withStroke(width=3, color="w")])
-    #txt.arrow_patch.set_path_effects([PathEffets.withStroke(width=3, color="w")])
-    txt.arrow_patch.set_path_effects([PathEffets.Stroke(width=5, color="w"),
-                                      PathEffets.Normal()])
+    txt.set_path_effects([PathEffects.withStroke(width=3, color="w")])
+    #txt.arrow_patch.set_path_effects([PathEffects.withStroke(width=3, color="w")])
+    txt.arrow_patch.set_path_effects([PathEffects.Stroke(width=5, color="w"),
+                                      PathEffects.Normal()])
