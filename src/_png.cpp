@@ -1,4 +1,4 @@
-#include <png.h>
+ #include <png.h>
 
 // To remove a gcc warning
 #ifdef _POSIX_C_SOURCE
@@ -9,6 +9,7 @@
 #include "CXX/Extensions.hxx"
 #include "numpy/arrayobject.h"
 #include "mplutils.h"
+#include <Python.h>
 
 // the extension module
 class _png_module : public Py::ExtensionModule<_png_module>
@@ -21,6 +22,8 @@ public:
                            "write_png(buffer, width, height, fileobj, dpi=None)");
         add_varargs_method("read_png", &_png_module::read_png,
                            "read_png(fileobj)");
+        add_varargs_method("read_png_from_buffer", &_png_module::read_png_from_buffer,
+                           "read_png_from_buffer(bufferobj)");
         initialize("Module to write PNG files");
     }
 
@@ -29,6 +32,7 @@ public:
 private:
     Py::Object write_png(const Py::Tuple& args);
     Py::Object read_png(const Py::Tuple& args);
+    Py::Object read_png_from_buffer(const Py::Tuple& args);
 };
 
 static void write_png_data(png_structp png_ptr, png_bytep data, png_size_t length) {
@@ -345,6 +349,197 @@ _png_module::read_png(const Py::Tuple& args) {
   delete [] row_pointers;
   return Py::asObject((PyObject*)A);
 }
+
+
+typedef struct _buffer_reader {
+  PyObject *buf;
+  unsigned int total_seg;
+  unsigned int current_seg;
+  png_bytep current_seg_pointer;
+  unsigned int current_seg_len;
+  unsigned int current_seg_pos;
+} buffer_reader;
+
+
+void buf_copy(buffer_reader &br, void *p, unsigned int byteToCopy) {
+  //PyObject *buf;
+  PyBufferProcs *buf_procs;
+  int byteToCopyCurrent, byteToCopyRem;
+
+  if (byteToCopy <= br.current_seg_len - br.current_seg_pos) {
+    memcpy(p, br.current_seg_pointer, byteToCopy);
+    //printf("%d %d\n", br.current_seg_pos, byteToCopy);
+    br.current_seg_pos += byteToCopy;
+    br.current_seg_pointer += byteToCopy;
+  } else {
+    byteToCopyCurrent = br.current_seg_len - br.current_seg_pos;
+    byteToCopyRem = byteToCopy - byteToCopyCurrent;
+    br.current_seg++;
+    if (br.current_seg < br.total_seg) {
+      buf_procs = br.buf->ob_type->tp_as_buffer;
+      br.current_seg_len = buf_procs->bf_getreadbuffer(br.buf, br.current_seg,
+						       (void **)&(br.current_seg_pointer));
+
+      buf_copy(br, ((png_bytep) p) + byteToCopyCurrent, byteToCopyRem);
+    } else {
+      throw Py::RuntimeError(Printf("_image_module::reading buffer fails").str());
+    }
+  }
+}
+
+void buf_read(png_structp png_ptr, png_bytep outBytes,
+	      png_size_t byteCountToRead)
+{
+  //PyObject *buf_procs;
+  //void *ptrptr;
+  buffer_reader *brp = (buffer_reader *) (png_ptr->io_ptr);
+
+  buf_copy(*brp, outBytes, byteCountToRead);
+}
+
+
+
+Py::Object
+_png_module::read_png_from_buffer(const Py::Tuple& args) {
+
+  args.verify_length(1);
+  //std::string fname = Py::String(args[0]);
+  //args[0]
+  PyObject *buf;
+  PyBufferProcs *buf_procs;
+  png_byte header[8];	// 8 is the maximum size that can be checked
+  void *ptrptr;
+  int l;
+  buffer_reader br;
+
+  //buf = PyBuffer_FromObject(args[0], 0, Py_END_OF_BUFFER);
+
+  buf = args[0].ptr();
+  if (PyBuffer_Check(buf)) {
+  } else {
+    throw Py::RuntimeError(Printf("_image_module::read_png_from_buffer takes Buffer object").str());
+  }
+
+  buf_procs = buf->ob_type->tp_as_buffer;
+  //buf_procs->bf_getreadbuffer(buf, 8*sizeof(png_byte), ptrptr);
+  br.buf = buf;
+  br.total_seg = buf_procs->bf_getsegcount(buf, NULL);
+  br.current_seg_len = buf_procs->bf_getreadbuffer(buf, 0,
+						   (void**)&(br.current_seg_pointer));
+  br.current_seg_pos = 0;
+  buf_copy(br, header, 8*sizeof(png_byte));
+
+  if (png_sig_cmp(header, 0, 8))
+    throw Py::RuntimeError("_image_module::readpng: buffer not recognized as a PNG file");
+
+
+  /* initialize stuff */
+  png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+  if (!png_ptr)
+    throw Py::RuntimeError("_image_module::readpng:  png_create_read_struct failed");
+
+  png_infop info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr)
+    throw Py::RuntimeError("_image_module::readpng:  png_create_info_struct failed");
+
+  if (setjmp(png_jmpbuf(png_ptr)))
+    throw Py::RuntimeError("_image_module::readpng:  error during init_io");
+
+  //png_init_io(png_ptr, fp);
+  png_set_read_fn(png_ptr, &br, buf_read);
+
+  png_set_sig_bytes(png_ptr, 8);
+
+  png_read_info(png_ptr, info_ptr);
+
+  png_uint_32 width = info_ptr->width;
+  png_uint_32 height = info_ptr->height;
+  bool do_gray_conversion = (info_ptr->bit_depth < 8 &&
+                             info_ptr->color_type == PNG_COLOR_TYPE_GRAY);
+
+  int bit_depth = info_ptr->bit_depth;
+  if (bit_depth == 16) {
+    png_set_strip_16(png_ptr);
+  } else if (bit_depth < 8) {
+    png_set_packing(png_ptr);
+  }
+
+  // convert misc color types to rgb for simplicity
+  if (info_ptr->color_type == PNG_COLOR_TYPE_GRAY ||
+      info_ptr->color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+    png_set_gray_to_rgb(png_ptr);
+  } else if (info_ptr->color_type == PNG_COLOR_TYPE_PALETTE) {
+    png_set_palette_to_rgb(png_ptr);
+  }
+
+  png_set_interlace_handling(png_ptr);
+  png_read_update_info(png_ptr, info_ptr);
+
+  bool rgba = info_ptr->color_type == PNG_COLOR_TYPE_RGBA;
+  if ( (info_ptr->color_type != PNG_COLOR_TYPE_RGB) && !rgba) {
+    std::cerr << "Found color type " << (int)info_ptr->color_type  << std::endl;
+    throw Py::RuntimeError("_image_module::readpng: cannot handle color_type");
+  }
+
+  /* read file */
+  if (setjmp(png_jmpbuf(png_ptr)))
+    throw Py::RuntimeError("_image_module::readpng: error during read_image");
+
+  png_bytep *row_pointers = new png_bytep[height];
+  png_uint_32 row;
+
+  for (row = 0; row < height; row++)
+    row_pointers[row] = new png_byte[png_get_rowbytes(png_ptr,info_ptr)];
+
+  png_read_image(png_ptr, row_pointers);
+
+  npy_intp dimensions[3];
+  dimensions[0] = height;  //numrows
+  dimensions[1] = width;   //numcols
+  dimensions[2] = 4;
+
+  PyArrayObject *A = (PyArrayObject *) PyArray_SimpleNew(3, dimensions, PyArray_FLOAT);
+
+  if (do_gray_conversion) {
+    float max_value = (float)((1L << bit_depth) - 1);
+    for (png_uint_32 y = 0; y < height; y++) {
+      png_byte* row = row_pointers[y];
+      for (png_uint_32 x = 0; x < width; x++) {
+        float value = row[x] / max_value;
+        size_t offset = y*A->strides[0] + x*A->strides[1];
+        *(float*)(A->data + offset + 0*A->strides[2]) = value;
+        *(float*)(A->data + offset + 1*A->strides[2]) = value;
+        *(float*)(A->data + offset + 2*A->strides[2]) = value;
+        *(float*)(A->data + offset + 3*A->strides[2]) = 1.0f;
+      }
+    }
+  } else {
+    for (png_uint_32 y = 0; y < height; y++) {
+      png_byte* row = row_pointers[y];
+      for (png_uint_32 x = 0; x < width; x++) {
+        png_byte* ptr = (rgba) ? &(row[x*4]) : &(row[x*3]);
+        size_t offset = y*A->strides[0] + x*A->strides[1];
+        *(float*)(A->data + offset + 0*A->strides[2]) = (float)(ptr[0]/255.0);
+        *(float*)(A->data + offset + 1*A->strides[2]) = (float)(ptr[1]/255.0);
+        *(float*)(A->data + offset + 2*A->strides[2]) = (float)(ptr[2]/255.0);
+        *(float*)(A->data + offset + 3*A->strides[2]) = rgba ? (float)(ptr[3]/255.0) : 1.0f;
+      }
+    }
+  }
+
+  //free the png memory
+  png_read_end(png_ptr, info_ptr);
+  png_destroy_read_struct(&png_ptr, &info_ptr, png_infopp_NULL);
+  //fclose(fp);
+  //Py_XDECREF(buf);
+  for (row = 0; row < height; row++)
+    delete [] row_pointers[row];
+  delete [] row_pointers;
+  return Py::asObject((PyObject*)A);
+}
+
+
 
 extern "C"
     DL_EXPORT(void)

@@ -28,21 +28,20 @@ import subprocess
 
 _dvistate = mpl_cbook.Bunch(pre=0, outer=1, inpage=2, post_post=3, finale=4)
 
-class Dvi(object):
+class DviFromFileLike(object):
     """
     A dvi ("device-independent") file, as produced by TeX.
     The current implementation only reads the first page and does not
     even attempt to verify the postamble.
     """
 
-    def __init__(self, filename, dpi):
+    def __init__(self, filelike_obj, dpi):
         """
         Initialize the object. This takes the filename as input and
         opens the file; actually reading the file happens when
         iterating through the pages of the file.
         """
-        matplotlib.verbose.report('Dvi: ' + filename, 'debug')
-        self.file = open(filename, 'rb')
+        self.file = filelike_obj
         self.dpi = dpi
         self.fonts = {}
         self.state = _dvistate.pre
@@ -381,6 +380,25 @@ class Dvi(object):
     def _post_post(self):
         raise NotImplementedError
 
+
+class Dvi(DviFromFileLike):
+    """
+    A dvi ("device-independent") file, as produced by TeX.
+    The current implementation only reads the first page and does not
+    even attempt to verify the postamble.
+    """
+
+    def __init__(self, filename, dpi):
+        """
+        Initialize the object. This takes the filename as input and
+        opens the file; actually reading the file happens when
+        iterating through the pages of the file.
+        """
+        matplotlib.verbose.report('Dvi: ' + filename, 'debug')
+        super(Dvi, self).__init__(open(filename, 'rb'), dpi)
+
+
+
 class DviFont(object):
     """
     Object that holds a font's texname and size, supports comparison,
@@ -391,22 +409,22 @@ class DviFont(object):
     The size is in Adobe points (converted from TeX points).
 
     .. attribute:: texname
-    
+
        Name of the font as used internally by TeX and friends. This
        is usually very different from any external font names, and
        :class:`dviread.PsfontsMap` can be used to find the external
        name of the font.
 
     .. attribute:: size
-    
+
        Size of the font in Adobe points, converted from the slightly
        smaller TeX points.
 
     .. attribute:: widths
-    
+
        Widths of glyphs in glyph-space units, typically 1/1000ths of
        the point size.
-    
+
     """
     __slots__ = ('texname', 'size', 'widths', '_scale', '_vf', '_tfm')
 
@@ -586,9 +604,9 @@ class Tfm(object):
     .. attribute:: height
 
        Height of each character.
-    
+
     .. attribute:: depth
-        
+
        Depth of each character.
     """
     __slots__ = ('checksum', 'design_size', 'width', 'height', 'depth')
@@ -822,7 +840,7 @@ def find_tex_file(filename, format=None):
     if format is not None:
         cmd += ['--format=' + format]
     cmd += [filename]
-    
+
     matplotlib.verbose.report('find_tex_file(%s): %s' \
                                   % (filename,cmd), 'debug')
     pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -840,7 +858,7 @@ def _read_nointr(pipe, bufsize=-1):
                 continue
             else:
                 raise
-        
+
 
 # With multiple text objects per figure (e.g. tick labels) we may end
 # up reading the same tfm and vf files many times, so we implement a
